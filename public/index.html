@@ -279,6 +279,150 @@
     if(sessions.length) renderList(), renderBox();
     loadIndexAndQA();
     window.reloadQA = loadIndexAndQA;
+ /* --- Client helper: user/session/message flow --- */
+const API_BASE = ''; // empty => same origin (https://adamdh7ai.onrender.com)
+
+/** Ensure we have a TFID in localStorage, otherwise create one on server */
+async function ensureUser(name = null) {
+  let tf = localStorage.getItem('tfid');
+  if (tf) {
+    // verify server knows it (optional)
+    const r = await fetch(API_BASE + '/user', {
+      method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({ tfid: tf })
+    });
+    if (r.ok) {
+      const j = await r.json();
+      return j.tfid;
+    }
+    // if server doesn't know it, drop and recreate
+    localStorage.removeItem('tfid');
+  }
+
+  // create new user
+  const resp = await fetch(API_BASE + '/user', {
+    method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({ name })
+  });
+  if (!resp.ok) throw new Error('user create failed: ' + resp.status);
+  const j = await resp.json();
+  localStorage.setItem('tfid', j.tfid);
+  return j.tfid;
+}
+
+/** Create a new session for current TFID and store it */
+async function createSessionForCurrentUser() {
+  const tfid = await ensureUser();
+  const resp = await fetch(API_BASE + '/session', {
+    method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({ tfid })
+  });
+  if (!resp.ok) {
+    const t = await resp.text().catch(()=>null);
+    throw new Error('create session failed: ' + resp.status + ' ' + (t||''));
+  }
+  const j = await resp.json();
+  localStorage.setItem('currentSessionId', j.sessionId);
+  return j.sessionId;
+}
+
+/** Send a message (uses tfid and currentSessionId) */
+async function sendMessage(text) {
+  const tfid = localStorage.getItem('tfid') || await ensureUser();
+  let sessionId = localStorage.getItem('currentSessionId');
+  if (!sessionId) {
+    sessionId = await createSessionForCurrentUser();
+  }
+
+  // append user in UI
+  addMessageToUI(text, 'user');
+
+  // show thinking
+  const thinkingEl = addMessageToUI('*TF-Chat — en cours...*', 'bot', true);
+
+  try {
+    const resp = await fetch(API_BASE + '/message', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({ tfid, sessionId, text })
+    });
+    if (!resp.ok) {
+      const txt = await resp.text().catch(()=>null);
+      throw new Error('server returned ' + resp.status + ' — ' + (txt||''));
+    }
+    const j = await resp.json();
+    // remove thinking
+    thinkingEl.remove();
+    // show assistant answer
+    addMessageToUI(j.assistant || '(Repons pa klè)', 'bot');
+  } catch (err) {
+    thinkingEl.remove();
+    console.error(err);
+    addMessageToUI('Erè: ' + err.message, 'bot');
+  }
+}
+
+/* Simple UI helpers (use your existing append/render functions instead) */
+function addMessageToUI(text, who='bot', isThinking=false){
+  const box=document.getElementById('chatBox');
+  const wrap=document.createElement('div');
+  wrap.className = isThinking ? 'thinking' : 'message ' + (who==='user' ? 'user' : 'bot');
+  if(isThinking){
+    wrap.textContent = text;
+    box.appendChild(wrap);
+    box.scrollTop = box.scrollHeight;
+    return wrap;
+  }
+  if(typeof text === 'string' && text.startsWith('```') && text.endsWith('```')){
+    const content = text.slice(3,-3);
+    const modal = document.createElement('div');
+    modal.className = 'code-modal';
+    modal.textContent = content;
+    const btn = document.createElement('button');
+    btn.className='copy-btn'; btn.textContent='Copy';
+    btn.onclick = ()=>{ navigator.clipboard.writeText(content); btn.textContent='✔️'; setTimeout(()=>btn.textContent='Copy',1000); };
+    modal.appendChild(btn);
+    wrap.appendChild(modal);
+  } else {
+    const c=document.createElement('div'); c.className='content'; c.textContent=text; wrap.appendChild(c);
+  }
+  box.appendChild(wrap);
+  box.scrollTop = box.scrollHeight;
+  return wrap;
+}
+
+/* Hook into your form submit */
+const chatForm = document.getElementById('chatForm');
+if(chatForm){
+  chatForm.addEventListener('submit', async (e)=>{
+    e.preventDefault();
+    const ta = document.getElementById('userInput');
+    const text = ta.value.trim();
+    if(!text) return;
+    ta.value = '';
+    // disable button while sending
+    const btn = chatForm.querySelector('button[type="submit"]');
+    if(btn){ btn.disabled=true; btn.style.opacity='0.7'; }
+    try {
+      await sendMessage(text);
+    } catch(e) {
+      console.error(e);
+    } finally {
+      if(btn){ btn.disabled=false; btn.style.opacity='1'; }
+    }
+  });
+}
+
+/* When page loads, ensure user exists (silent) and create an initial session */
+window.addEventListener('load', async ()=>{
+  try {
+    await ensureUser();
+    // optionally create a session now:
+    if(!localStorage.getItem('currentSessionId')){
+      await createSessionForCurrentUser();
+    }
+  } catch(e){
+    console.warn('init user/session failed', e);
+  }
+});
   </script>
+  
 </body>
   </html>
