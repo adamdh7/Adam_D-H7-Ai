@@ -1,0 +1,284 @@
+<!DOCTYPE html>
+<html lang="ht">
+<head>
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>Adam_D'H7</title>
+  <style>
+    /* COLOR GUIDE:
+       - Background: pure black
+       - AI messages: dark gray bubbles, light gray text
+       - User messages + Send button: dark blue
+       - Other UI elements: shades of gray
+    */
+
+    :root{
+      --bg: #000000;
+      --panel: #0a0a0a;          /* chat panel slightly lighter than black */
+      --ai-bubble: #262626;      /* dark gray for AI messages */
+      --ai-text: #d0d0d0;        /* light gray text for AI */
+      --muted: #7d7d7d;          /* general muted gray */
+      --user-blue: #0b3d91;      /* dark blue for user messages & button */
+      --user-text: #e8f4ff;      /* pale text on blue bubble */
+      --border: rgba(255,255,255,0.04);
+      --timestamp: #6faee6;
+    }
+
+    /* Base layout */
+    html,body{height:100%;margin:0;padding:0;background:var(--bg);color:var(--muted);font-family:Arial,Helvetica,sans-serif}
+    header{background:var(--panel);padding:14px 16px;text-align:center;font-size:20px;font-weight:700;position:relative;color:var(--user-blue);box-shadow:0 2px 6px rgba(0,0,0,0.7)}
+    .menu-btn{position:absolute;left:14px;top:12px;font-size:22px;cursor:pointer;color:var(--muted)}
+    /* Chat area */
+    .chat-box{display:flex;flex-direction:column;padding:18px;padding-bottom:92px;max-height:calc(100vh - 150px);overflow-y:auto;background:var(--panel)}
+    .message{margin:12px 0;max-width:72%;position:relative;overflow-wrap:anywhere;word-break:break-word;white-space:pre-wrap}
+    .message.user{align-self:flex-end}
+    .message.bot{align-self:flex-start}
+    .message.user .content{background:var(--user-blue);color:var(--user-text);border-radius:18px;padding:10px 14px}
+    .message.bot .content{background:var(--ai-bubble);color:var(--ai-text);border-radius:18px;padding:10px 14px;border:1px solid var(--border)}
+    .content{font-size:15px;line-height:1.35}
+    .timestamp{font-size:11px;color:var(--timestamp);margin-top:6px;text-align:right}
+    .thinking{font-style:italic;color:var(--timestamp);text-align:center;margin:12px 0}
+    /* Sidebar */
+    .sidebar{position:fixed;top:0;left:-100%;width:80%;height:100%;background:var(--panel);z-index:100;box-shadow:2px 0 12px rgba(0,0,0,0.7);transition:left .28s ease;padding:18px;color:var(--muted)}
+    .sidebar.active{left:0}
+    .menu-header{display:flex;justify-content:space-between;align-items:center;margin-bottom:12px}
+    .chat-list{list-style:none;padding:0;margin:0;overflow-y:auto;max-height:calc(100% - 60px)}
+    .chat-list li{padding:8px;border-radius:6px;cursor:pointer;transition:background .18s;margin-bottom:10px;color:var(--muted)}
+    .chat-list li:hover{background:rgba(255,255,255,0.02)}
+    /* Code modal */
+    .code-modal{background:#000;color:var(--ai-text);font-family:Menlo,monospace;padding:18px;border-radius:10px;margin:14px 0;max-width:90%;white-space:pre-wrap;border:1px solid rgba(255,255,255,0.03)}
+    .copy-btn{position:absolute;top:10px;right:10px;background:var(--user-blue);color:var(--user-text);border:none;border-radius:6px;padding:6px 10px;cursor:pointer}
+    .copy-btn:hover{opacity:0.95}
+    /* Form */
+    form{display:flex;padding:12px;background:var(--panel);border-top:1px solid rgba(255,255,255,0.03);position:fixed;bottom:0;left:0;right:0;align-items:center;gap:10px}
+    textarea{flex:1;padding:10px;font-size:15px;border-radius:18px;border:1px solid rgba(255,255,255,0.04);outline:none;resize:none;height:40px;background:#050505;color:var(--ai-text)}
+    textarea::placeholder{color:rgba(255,255,255,0.18)}
+    button{background:linear-gradient(180deg,var(--user-blue),#06306a);color:var(--user-text);border:none;padding:10px 18px;border-radius:18px;font-size:15px;cursor:pointer;box-shadow:0 6px 18px rgba(11,61,145,0.14)}
+    button:active{transform:translateY(1px)}
+    /* small screens */
+    @media (max-width:600px){
+      .chat-box{padding:12px;padding-bottom:120px}
+      header{font-size:18px}
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <div class="menu-btn" onclick="toggleSidebar()">☰</div>
+    Adam_D'H7 
+  </header>
+
+  <div class="sidebar" id="sidebar">
+    <div class="menu-header"><h3 style="margin:0;color:var(--ai-text)">Chats</h3><button onclick="newChat()" style="background:none;border:1px solid rgba(255,255,255,0.04);color:var(--muted);padding:6px 10px;border-radius:6px;cursor:pointer">Nouveau Chat</button></div>
+    <ul class="chat-list" id="chatList"></ul>
+  </div>
+
+  <div class="chat-box" id="chatBox"></div>
+
+  <form id="chatForm">
+    <textarea id="userInput" placeholder="Adam_D'H7 le meilleiur assistant"></textarea>
+    <button type="submit">➤</button>
+  </form>
+
+  <script>
+    // Notifications
+    if (Notification && Notification.permission !== 'granted') Notification.requestPermission();
+
+    const STORAGE_KEY = 'tfai_sessions';
+    let sessions = JSON.parse(localStorage.getItem(STORAGE_KEY)||'[]');
+    let currentSession = sessions.length?0:null;
+
+    // QA pool
+    let qaPool = [];
+
+    function save(){localStorage.setItem(STORAGE_KEY,JSON.stringify(sessions));}
+    function toggleSidebar(){document.getElementById('sidebar').classList.toggle('active');}
+    function newChat(){sessions.unshift({title:'Nouveau Chat',messages:[]});currentSession=0;save();renderList();renderBox();toggleSidebar();}
+    function renderList(){const l=document.getElementById('chatList');l.innerHTML='';sessions.forEach((s,i)=>{let li=document.createElement('li');li.textContent=s.title;li.onclick=()=>{currentSession=i;renderBox();toggleSidebar();};l.appendChild(li);});}
+    function renderBox(){const box=document.getElementById('chatBox');box.innerHTML='';if(currentSession===null){box.innerHTML='<div style=\"padding:20px;color:var(--muted)\">Aucun chat — cliquez Nouveau Chat pour commencer</div>';return;}const sess=sessions[currentSession];sess.messages.forEach(m=>{let wrap=document.createElement('div');wrap.className=m.sender==='thinking'? 'thinking' : 'message '+m.sender; if(m.sender==='thinking'){wrap.textContent=m.text;} else if(typeof m.text==='string' && m.text.startsWith('```')&&m.text.endsWith('```')){let content=m.text.slice(3,-3);let modal=document.createElement('div');modal.className='code-modal';modal.textContent=content;let btn=document.createElement('button');btn.className='copy-btn';btn.textContent='Copy';btn.onclick=()=>{navigator.clipboard.writeText(content);btn.textContent='✔️';setTimeout(()=>btn.textContent=' Copy',1000);} ;modal.appendChild(btn);wrap.appendChild(modal);} else{let c=document.createElement('div');c.className='content';c.textContent=m.text;wrap.appendChild(c);if(m.sender==='bot'&&m.ts){let ts=document.createElement('div');ts.className='timestamp';ts.textContent=`${Math.floor((Date.now()-m.ts)/1000)}s`;wrap.appendChild(ts);} }box.appendChild(wrap);});box.scrollTop=box.scrollHeight;}
+
+    // simple random util
+    function rand(arr){return arr[Math.floor(Math.random()*arr.length)];}
+
+    // Load index.json and listed files
+    async function loadIndexAndQA(){
+      qaPool = [];
+      try{
+        const res = await fetch('./index.json', {cache: 'no-store'});
+        if(!res.ok) return console.warn('index.json not found or not OK:', res.status);
+        const idx = await res.json();
+        const files = Array.isArray(idx) ? idx : (Array.isArray(idx.files) ? idx.files : []);
+        if(files.length===0) return console.warn('index.json empty or malformed');
+        await Promise.all(files.map(async (f) => {
+          try{
+            const r = await fetch('./'+f, {cache: 'no-store'});
+            if(!r.ok) { console.warn('File not loaded', f); return; }
+            const data = await r.json();
+            let items = [];
+            if(Array.isArray(data)) items = data;
+            else if(Array.isArray(data.qa)) items = data.qa;
+            else if(Array.isArray(data.questions)) items = data.questions;
+            else return;
+
+            items.forEach(it => {
+              if(!it) return;
+              const question = it.question || it.q || it.prompt || it.text;
+              let answers = [];
+              if(Array.isArray(it.answers)) answers = it.answers;
+              else if(Array.isArray(it.responses)) answers = it.responses;
+              else if(typeof it.answer==='string') answers = [it.answer];
+              else if(Array.isArray(it)) answers = it;
+              if(question && answers.length) qaPool.push({question, answers});
+            });
+          }catch(e){console.warn('Error reading', f, e);}
+        }));
+        console.log('QA pool loaded. entries:', qaPool.length);
+      }catch(err){console.error('loadIndexAndQA error', err);}
+    }
+
+    // Normalization + levenshtein
+    function normalizeText(s){
+      if(!s) return '';
+      return s.toString().normalize('NFD').replace(/[\u0300-\u036f]/g,'').toLowerCase().replace(/[^a-z0-9\s]/g,'').replace(/\s+/g,' ').trim();
+    }
+    function levenshtein(a,b){
+      if(a===b) return 0;
+      const al=a.length, bl=b.length;
+      if(al===0) return bl;
+      if(bl===0) return al;
+      let v0=new Array(bl+1), v1=new Array(bl+1);
+      for(let i=0;i<=bl;i++) v0[i]=i;
+      for(let i=0;i<al;i++){
+        v1[0]=i+1;
+        for(let j=0;j<bl;j++){
+          const cost = a[i]===b[j]?0:1;
+          v1[j+1]=Math.min(v1[j]+1, v0[j+1]+1, v0[j]+cost);
+        }
+        [v0,v1]=[v1,v0];
+      }
+      return v0[bl];
+    }
+
+    function findBestQA(userText){
+      if(!userText||qaPool.length===0) return null;
+      const normInput=normalizeText(userText);
+      for(const e of qaPool){
+        const qnorm=normalizeText(e.question||'');
+        if(qnorm&&qnorm===normInput) return {entry:e,type:'exact'};
+      }
+      for(const e of qaPool){
+        const qnorm=normalizeText(e.question||'');
+        if(qnorm.includes(normInput)||normInput.includes(qnorm)) return {entry:e,type:'include'};
+      }
+      let best=null, bestScore=-1;
+      for(const e of qaPool){
+        const qnorm=normalizeText(e.question||''); if(!qnorm) continue;
+        const dist=levenshtein(normInput,qnorm);
+        const maxLen=Math.max(normInput.length,qnorm.length);
+        const sim=maxLen===0?1:(1-dist/maxLen);
+        if(sim>bestScore){bestScore=sim;best=e;}
+      }
+      if(best && bestScore>=0.50) return {entry:best,type:'fuzzy',score:bestScore};
+      return null;
+    }
+
+    function produceAnswerFor(userText){
+      if(qaPool.length===0) return 'Grav pa wè sa poum diw';
+      const match=findBestQA(userText);
+      if(!match) return "Mwen pa wè sam ta diw la";
+      const answers = match.entry.answers || match.entry.responses || [];
+      if(answers.length===0) return "(Kesyon jwenn men pa gen repons nan JSON la.)";
+      return answers.join('\n');
+    }
+
+    // Build messages for OpenRouter from session history
+    function buildMessagesForOpenRouter(sessMessages, userText){
+      const sys = { role: 'system', content: 'You are TF-Chat, a helpful assistant.' };
+      const msgs=[sys];
+      const valid=(sessMessages||[]).filter(m=>m.sender==='user'||m.sender==='bot');
+      const tail=valid.slice(-8); // keep last pairs
+      for(const m of tail){
+        if(m.sender==='user') msgs.push({role:'user',content:m.text});
+        else msgs.push({role:'assistant',content:m.text});
+      }
+      msgs.push({role:'user',content:userText});
+      return msgs;
+    }
+
+    // Call proxy /openrouter
+    async function callOpenRouter(messages){
+      const body = {
+        model: 'openai/gpt-5',
+        messages: messages,
+        max_tokens: 512,
+        temperature: 0.2
+      };
+      const resp = await fetch('/openrouter', {
+        method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body)
+      });
+      if(!resp.ok){
+        const txt = await resp.text().catch(()=>null);
+        throw new Error('OpenRouter proxy error: '+resp.status+' '+(txt||''));
+      }
+      return resp.json();
+    }
+
+    // Form submit: try OpenRouter then fallback to local QA
+    document.getElementById('chatForm').addEventListener('submit', async (e)=>{
+      e.preventDefault();
+      let ta=document.getElementById('userInput'), text=ta.value.trim();
+      if(!text) return;
+      if(currentSession===null) newChat();
+      let sess=sessions[currentSession];
+      sess.messages.push({sender:'user',text,ts:Date.now()});
+      if(sess.messages[0] && typeof sess.messages[0].text === 'string') sess.title = sess.messages[0].text.slice(0,100);
+      save(); renderList(); renderBox(); ta.value='';
+      let thinking={sender:'thinking',text:'*TF-Chat*'};
+      sess.messages.push(thinking); renderBox();
+
+      try{
+        const msgs = buildMessagesForOpenRouter(sess.messages, text);
+        const j = await callOpenRouter(msgs);
+        // remove thinking
+        sess.messages = sess.messages.filter(m=>m!==thinking);
+        // extract assistant text robustly
+        let assistantText = null;
+        if(j.choices && j.choices[0]){
+          const c = j.choices[0];
+          if(c.message && typeof c.message.content === 'string') assistantText = c.message.content;
+          else if(c.text) assistantText = c.text;
+          else if(c.message && Array.isArray(c.message.content)) assistantText = c.message.content.map(p=>p.text||'').join('');
+        }
+        if(!assistantText) assistantText = "(Repons pa klè)";
+        sess.messages.push({sender:'bot',text:assistantText,ts:Date.now()});
+        save(); renderBox();
+        if(document.hidden && Notification.permission==='granted') new Notification('TF-Chat',{body:'Nouvo mesaj TF-Chat'});
+      }catch(err){
+        // fallback to local QA
+        console.warn('OpenRouter failed, fallback to local', err);
+        sess.messages = sess.messages.filter(m=>m!==thinking);
+        let botText = produceAnswerFor(text);
+        let botMsg = {sender:'bot',text:botText,ts:Date.now()};
+        sess.messages.push(botMsg);
+        save(); renderBox();
+        if(document.hidden&&Notification.permission==='granted') new Notification('TF-Chat',{body:'Nouvo mesaj TF-Chat'});
+      }
+    });
+
+    // Enter => newline (keep old behaviour)
+    document.getElementById('userInput').addEventListener('keydown', e=>{
+      if(e.key==='Enter' && !e.shiftKey){
+        e.preventDefault();
+        let t=e.target, s=t.selectionStart, v=t.value;
+        t.value = v.slice(0,s) + '\n' + v.slice(s);
+        t.selectionStart = t.selectionEnd = s+1;
+      }
+    });
+
+    // initial rendering
+    if(sessions.length) renderList(), renderBox();
+    loadIndexAndQA();
+    window.reloadQA = loadIndexAndQA;
+  </script>
+</body>
+  </html>
