@@ -2,34 +2,76 @@
 <html lang="ht">
 <head>
   <meta charset="UTF-8"/>
-  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <!-- Prevent zooming on mobile -->
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no"/>
   <title>Adam_D'H7</title>
   <style>
-    /* COLOR GUIDE:
-       - Background: pure black
-       - AI messages: dark gray bubbles, light gray text
-       - User messages + Send button: dark blue
-       - Other UI elements: shades of gray
-    */
-
     :root{
       --bg: #000000;
-      --panel: #0a0a0a;          /* chat panel slightly lighter than black */
-      --ai-bubble: #262626;      /* dark gray for AI messages */
-      --ai-text: #d0d0d0;        /* light gray text for AI */
-      --muted: #7d7d7d;          /* general muted gray */
-      --user-blue: #0b3d91;      /* dark blue for user messages & button */
-      --user-text: #e8f4ff;      /* pale text on blue bubble */
+      --panel: #000000;
+      --name-gray: #7d7d7d;
+      --ai-bubble: #262626;
+      --ai-text: #d0d0d0;
+      --user-blue: #0b3d91;
+      --user-text: #e8f4ff;
       --border: rgba(255,255,255,0.04);
       --timestamp: #6faee6;
+      --header-h: 56px;
+      --form-h: 84px;
     }
 
-    /* Base layout */
-    html,body{height:100%;margin:0;padding:0;background:var(--bg);color:var(--muted);font-family:Arial,Helvetica,sans-serif}
-    header{background:var(--panel);padding:14px 16px;text-align:center;font-size:20px;font-weight:700;position:relative;color:var(--user-blue);box-shadow:0 2px 6px rgba(0,0,0,0.7)}
-    .menu-btn{position:absolute;left:14px;top:12px;font-size:22px;cursor:pointer;color:var(--muted)}
-    /* Chat area */
-    .chat-box{display:flex;flex-direction:column;padding:18px;padding-bottom:92px;max-height:calc(100vh - 150px);overflow-y:auto;background:var(--panel)}
+    /* Prevent page scrolling (only chat-box should scroll) */
+    html,body{
+      height:100%;
+      margin:0;
+      padding:0;
+      background:var(--bg);
+      color:var(--ai-text);
+      font-family:Arial,Helvetica,sans-serif;
+      -webkit-text-size-adjust:100%;
+      -webkit-overflow-scrolling:touch;
+      overscroll-behavior-y:none;
+      overflow:hidden; /* page won't scroll */
+      touch-action:pan-y;
+    }
+
+    /* Fixed header - always top */
+    header{
+      background:var(--panel);
+      height:var(--header-h);
+      display:flex;
+      align-items:center;
+      justify-content:center;
+      position:fixed;
+      top:0;
+      left:0;
+      right:0;
+      z-index:999;
+      box-shadow:0 1px 0 rgba(255,255,255,0.02) inset;
+      padding:0 12px;
+      user-select:none;
+    }
+    .menu-btn{position:absolute;left:12px;font-size:22px;cursor:pointer;color:var(--ai-text)}
+    .name-title{font-weight:800;color:var(--name-gray);font-size:20px;letter-spacing:0.2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+
+    /* Chat area - positioned between header and form (JS will tweak top/bottom on resize) */
+    .chat-box{
+      position:fixed;
+      left:0;
+      right:0;
+      top:var(--header-h);
+      bottom:var(--form-h);
+      display:flex;
+      flex-direction:column;
+      padding:12px 18px;
+      padding-top: 12px;
+      padding-bottom: 12px;
+      overflow-y:auto;
+      background:var(--panel);
+      box-sizing:border-box;
+      -webkit-overflow-scrolling:touch;
+    }
+
     .message{margin:12px 0;max-width:72%;position:relative;overflow-wrap:anywhere;word-break:break-word;white-space:pre-wrap}
     .message.user{align-self:flex-end}
     .message.bot{align-self:flex-start}
@@ -37,392 +79,367 @@
     .message.bot .content{background:var(--ai-bubble);color:var(--ai-text);border-radius:18px;padding:10px 14px;border:1px solid var(--border)}
     .content{font-size:15px;line-height:1.35}
     .timestamp{font-size:11px;color:var(--timestamp);margin-top:6px;text-align:right}
-    .thinking{font-style:italic;color:var(--timestamp);text-align:center;margin:12px 0}
-    /* Sidebar */
-    .sidebar{position:fixed;top:0;left:-100%;width:80%;height:100%;background:var(--panel);z-index:100;box-shadow:2px 0 12px rgba(0,0,0,0.7);transition:left .28s ease;padding:18px;color:var(--muted)}
+
+    /* Thinking: inside bot bubble, slow dots */
+    .message.bot.thinking .content{display:flex;align-items:center;justify-content:flex-start;gap:10px;background:var(--ai-bubble);padding:8px 12px}
+    .thinking-dots{display:inline-flex;gap:8px}
+    .thinking-dots span{
+      display:inline-block;width:9px;height:9px;border-radius:50%;background:var(--timestamp);opacity:0.12;transform:translateY(0);animation:dot 1.6s infinite ease-in-out;
+    }
+    .thinking-dots span:nth-child(1){ animation-delay:0s; }
+    .thinking-dots span:nth-child(2){ animation-delay:0.45s; }
+    .thinking-dots span:nth-child(3){ animation-delay:0.9s; }
+    @keyframes dot{
+      0% {opacity:0.12; transform:translateY(0);}
+      25% {opacity:0.9; transform:translateY(-7px);}
+      55% {opacity:0.35; transform:translateY(0);}
+      100% {opacity:0.12; transform:translateY(0);}
+    }
+
+    /* Sidebar overlays header when active */
+    .sidebar{position:fixed;top:0;left:-100%;width:80%;height:100%;background:var(--panel);z-index:1001;box-shadow:2px 0 12px rgba(0,0,0,0.7);transition:left .28s ease;padding:18px;color:var(--ai-text);box-sizing:border-box}
     .sidebar.active{left:0}
     .menu-header{display:flex;justify-content:space-between;align-items:center;margin-bottom:12px}
     .chat-list{list-style:none;padding:0;margin:0;overflow-y:auto;max-height:calc(100% - 60px)}
-    .chat-list li{padding:8px;border-radius:6px;cursor:pointer;transition:background .18s;margin-bottom:10px;color:var(--muted)}
+    .chat-list li{padding:8px;border-radius:6px;cursor:pointer;transition:background .18s;margin-bottom:10px;color:var(--ai-text)}
     .chat-list li:hover{background:rgba(255,255,255,0.02)}
-    /* Code modal */
+    .sidebar .new-chat-btn{background:none;border:1px solid rgba(255,255,255,0.06);color:var(--ai-text);padding:6px 10px;border-radius:8px;cursor:pointer;font-size:14px}
+
+    /* Code modal & copy */
     .code-modal{background:#000;color:var(--ai-text);font-family:Menlo,monospace;padding:18px;border-radius:10px;margin:14px 0;max-width:90%;white-space:pre-wrap;border:1px solid rgba(255,255,255,0.03)}
     .copy-btn{position:absolute;top:10px;right:10px;background:var(--user-blue);color:var(--user-text);border:none;border-radius:6px;padding:6px 10px;cursor:pointer}
-    .copy-btn:hover{opacity:0.95}
-    /* Form */
-    form{display:flex;padding:12px;background:var(--panel);border-top:1px solid rgba(255,255,255,0.03);position:fixed;bottom:0;left:0;right:0;align-items:center;gap:10px}
-    textarea{flex:1;padding:10px;font-size:15px;border-radius:18px;border:1px solid rgba(255,255,255,0.04);outline:none;resize:none;height:40px;background:#050505;color:var(--ai-text)}
+
+    /* Form fixed bottom */
+    form{display:flex;padding:12px;background:var(--panel);border-top:1px solid rgba(255,255,255,0.03);position:fixed;bottom:0;left:0;right:0;align-items:center;gap:10px;height:var(--form-h);box-sizing:border-box}
+    textarea{flex:1;padding:10px;font-size:15px;border-radius:18px;border:1px solid rgba(255,255,255,0.04);outline:none;resize:none;height:56px;background:#050505;color:var(--ai-text);box-sizing:border-box;width:100%}
     textarea::placeholder{color:rgba(255,255,255,0.18)}
-    button{background:linear-gradient(180deg,var(--user-blue),#06306a);color:var(--user-text);border:none;padding:10px 18px;border-radius:18px;font-size:15px;cursor:pointer;box-shadow:0 6px 18px rgba(11,61,145,0.14)}
-    button:active{transform:translateY(1px)}
-    /* small screens */
+
+    /* Send button styled for icon-only */
+    .send{
+      display:inline-flex;
+      align-items:center;
+      justify-content:center;
+      width:48px;
+      height:48px;
+      background:linear-gradient(180deg,var(--user-blue),#06306a);
+      border-radius:50%;
+      border:none;
+      padding:0;
+      cursor:pointer;
+      box-shadow:0 6px 18px rgba(11,61,145,0.14);
+    }
+    .send svg{ width:20px; height:20px; display:block; filter:invert(1) contrast(200%); }
+
     @media (max-width:600px){
-      .chat-box{padding:12px;padding-bottom:120px}
+      .chat-box{padding:12px;padding-top: calc(var(--header-h) + 8px);padding-bottom: calc(var(--form-h) + 8px)}
       header{font-size:18px}
     }
   </style>
 </head>
 <body>
   <header>
-    <div class="menu-btn" onclick="toggleSidebar()">☰</div>
-    Adam_D'H7 
+    <div class="menu-btn" onclick="toggleSidebar()" aria-label="menu">☰</div>
+    <div class="name-title" id="headerName">Adam_D'H7</div>
   </header>
 
-  <div class="sidebar" id="sidebar">
-    <div class="menu-header"><h3 style="margin:0;color:var(--ai-text)">Chats</h3><button onclick="newChat()" style="background:none;border:1px solid rgba(255,255,255,0.04);color:var(--muted);padding:6px 10px;border-radius:6px;cursor:pointer">Nouveau Chat</button></div>
+  <div class="sidebar" id="sidebar" aria-hidden="true">
+    <div class="menu-header">
+      <h3 style="margin:0;color:var(--ai-text)">Chats</h3>
+      <button class="new-chat-btn" onclick="newChat()">Nouveau Chat</button>
+    </div>
     <ul class="chat-list" id="chatList"></ul>
   </div>
 
-  <div class="chat-box" id="chatBox"></div>
+  <div class="chat-box" id="chatBox" tabindex="-1" aria-live="polite"></div>
 
-  <form id="chatForm">
-    <textarea id="userInput" placeholder="Adam_D'H7 le meilleiur assistant"></textarea>
-    <button type="submit">➤</button>
+  <form id="chatForm" autocomplete="off" novalidate>
+    <textarea id="userInput" placeholder="Adam_D'H7 le meilleure assistant" aria-label="Message"></textarea>
+    <button class="send" type="submit" aria-label="Send">
+      <svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true" focusable="false">
+        <path d="M2 21L23 12L2 3L8 12L2 21Z" fill="currentColor"/>
+      </svg>
+    </button>
   </form>
 
   <script>
-    // Notifications
+    // -------------------------
+    // Helpers + layout
+    // -------------------------
+    const headerEl = document.querySelector('header');
+    const chatBox = document.getElementById('chatBox');
+    const formEl = document.querySelector('form');
+    const textarea = document.getElementById('userInput');
+
+    function scrollToBottom(immediate = true) {
+      try {
+        if (immediate) chatBox.scrollTop = chatBox.scrollHeight;
+        else chatBox.scrollTo({ top: chatBox.scrollHeight, behavior: 'smooth' });
+      } catch (e) {}
+    }
+
+    function adjustLayoutForViewport() {
+      // Set chatBox top/bottom based on actual header/form heights
+      const headerH = headerEl.offsetHeight || 56;
+      const formH = formEl.offsetHeight || 84;
+      chatBox.style.top = headerH + 'px';
+      chatBox.style.bottom = formH + 'px';
+      // ensure no extra padding top causes spacing
+      chatBox.style.paddingTop = '12px';
+      // small delay to let mobile keyboard/layout settle
+      setTimeout(()=> scrollToBottom(true), 60);
+    }
+
+    window.addEventListener('load', ()=>{ adjustLayoutForViewport(); });
+    window.addEventListener('resize', ()=>{ adjustLayoutForViewport(); });
+
+    textarea.addEventListener('focus', ()=>{
+      setTimeout(()=> adjustLayoutForViewport(), 80);
+      setTimeout(()=> scrollToBottom(true), 150);
+    });
+    textarea.addEventListener('blur', ()=>{ setTimeout(()=> adjustLayoutForViewport(), 80); });
+    textarea.addEventListener('input', ()=>{ scrollToBottom(true); });
+
+    // prevent pinch-zoom gesture where possible
+    window.addEventListener('gesturestart', e => e.preventDefault());
+
+    // -------------------------
+    // Session & UI state (local)
+    // -------------------------
+    if(!document.getElementById('headerName').textContent.trim()) document.getElementById('headerName').textContent = "Adam_D'H7";
     if (Notification && Notification.permission !== 'granted') Notification.requestPermission();
 
     const STORAGE_KEY = 'tfai_sessions';
-    let sessions = JSON.parse(localStorage.getItem(STORAGE_KEY)||'[]');
-    let currentSession = sessions.length?0:null;
+    let sessions = JSON.parse(localStorage.getItem(STORAGE_KEY) || '[]');
+    let currentSession = sessions.length ? 0 : null;
 
-    // QA pool
-    let qaPool = [];
+    function save(){ localStorage.setItem(STORAGE_KEY, JSON.stringify(sessions)); }
 
-    function save(){localStorage.setItem(STORAGE_KEY,JSON.stringify(sessions));}
-    function toggleSidebar(){document.getElementById('sidebar').classList.toggle('active');}
-    function newChat(){sessions.unshift({title:'Nouveau Chat',messages:[]});currentSession=0;save();renderList();renderBox();toggleSidebar();}
-    function renderList(){const l=document.getElementById('chatList');l.innerHTML='';sessions.forEach((s,i)=>{let li=document.createElement('li');li.textContent=s.title;li.onclick=()=>{currentSession=i;renderBox();toggleSidebar();};l.appendChild(li);});}
-    function renderBox(){const box=document.getElementById('chatBox');box.innerHTML='';if(currentSession===null){box.innerHTML='<div style=\"padding:20px;color:var(--muted)\">Aucun chat — cliquez Nouveau Chat pour commencer</div>';return;}const sess=sessions[currentSession];sess.messages.forEach(m=>{let wrap=document.createElement('div');wrap.className=m.sender==='thinking'? 'thinking' : 'message '+m.sender; if(m.sender==='thinking'){wrap.textContent=m.text;} else if(typeof m.text==='string' && m.text.startsWith('```')&&m.text.endsWith('```')){let content=m.text.slice(3,-3);let modal=document.createElement('div');modal.className='code-modal';modal.textContent=content;let btn=document.createElement('button');btn.className='copy-btn';btn.textContent='Copy';btn.onclick=()=>{navigator.clipboard.writeText(content);btn.textContent='✔️';setTimeout(()=>btn.textContent=' Copy',1000);} ;modal.appendChild(btn);wrap.appendChild(modal);} else{let c=document.createElement('div');c.className='content';c.textContent=m.text;wrap.appendChild(c);if(m.sender==='bot'&&m.ts){let ts=document.createElement('div');ts.className='timestamp';ts.textContent=`${Math.floor((Date.now()-m.ts)/1000)}s`;wrap.appendChild(ts);} }box.appendChild(wrap);});box.scrollTop=box.scrollHeight;}
-
-    // simple random util
-    function rand(arr){return arr[Math.floor(Math.random()*arr.length)];}
-
-    // Load index.json and listed files
-    async function loadIndexAndQA(){
-      qaPool = [];
-      try{
-        const res = await fetch('./index.json', {cache: 'no-store'});
-        if(!res.ok) return console.warn('index.json not found or not OK:', res.status);
-        const idx = await res.json();
-        const files = Array.isArray(idx) ? idx : (Array.isArray(idx.files) ? idx.files : []);
-        if(files.length===0) return console.warn('index.json empty or malformed');
-        await Promise.all(files.map(async (f) => {
-          try{
-            const r = await fetch('./'+f, {cache: 'no-store'});
-            if(!r.ok) { console.warn('File not loaded', f); return; }
-            const data = await r.json();
-            let items = [];
-            if(Array.isArray(data)) items = data;
-            else if(Array.isArray(data.qa)) items = data.qa;
-            else if(Array.isArray(data.questions)) items = data.questions;
-            else return;
-
-            items.forEach(it => {
-              if(!it) return;
-              const question = it.question || it.q || it.prompt || it.text;
-              let answers = [];
-              if(Array.isArray(it.answers)) answers = it.answers;
-              else if(Array.isArray(it.responses)) answers = it.responses;
-              else if(typeof it.answer==='string') answers = [it.answer];
-              else if(Array.isArray(it)) answers = it;
-              if(question && answers.length) qaPool.push({question, answers});
-            });
-          }catch(e){console.warn('Error reading', f, e);}
-        }));
-        console.log('QA pool loaded. entries:', qaPool.length);
-      }catch(err){console.error('loadIndexAndQA error', err);}
+    function toggleSidebar(){
+      const sb = document.getElementById('sidebar');
+      sb.classList.toggle('active');
+      sb.setAttribute('aria-hidden', !sb.classList.contains('active'));
     }
 
-    // Normalization + levenshtein
-    function normalizeText(s){
-      if(!s) return '';
-      return s.toString().normalize('NFD').replace(/[\u0300-\u036f]/g,'').toLowerCase().replace(/[^a-z0-9\s]/g,'').replace(/\s+/g,' ').trim();
+    function newChat(){
+      sessions.unshift({ title: "Nouveau Chat", messages: [] });
+      currentSession = 0;
+      save(); renderList(); renderBox();
+      const sb = document.getElementById('sidebar'); if(!sb.classList.contains('active')) sb.classList.add('active');
     }
-    function levenshtein(a,b){
-      if(a===b) return 0;
-      const al=a.length, bl=b.length;
-      if(al===0) return bl;
-      if(bl===0) return al;
-      let v0=new Array(bl+1), v1=new Array(bl+1);
-      for(let i=0;i<=bl;i++) v0[i]=i;
-      for(let i=0;i<al;i++){
-        v1[0]=i+1;
-        for(let j=0;j<bl;j++){
-          const cost = a[i]===b[j]?0:1;
-          v1[j+1]=Math.min(v1[j]+1, v0[j+1]+1, v0[j]+cost);
+
+    function renderList(){
+      const l = document.getElementById('chatList'); l.innerHTML = '';
+      sessions.forEach((s,i)=>{
+        const li = document.createElement('li'); li.textContent = s.title || 'Chat'; li.onclick = ()=>{ currentSession = i; renderBox(); toggleSidebar(); }; l.appendChild(li);
+      });
+    }
+
+    function renderBox(){
+      chatBox.innerHTML = '';
+      if (currentSession === null) {
+        chatBox.innerHTML = '<div style="padding:20px;color:var(--ai-text)">Aucun chat — ouvri sidebar epi klike Nouveau Chat pou kòmanse</div>';
+        return;
+      }
+      const sess = sessions[currentSession];
+      sess.messages.forEach(m => {
+        const wrap = document.createElement('div');
+        if (m.sender === 'thinking') {
+          wrap.className = 'message bot thinking';
+          const content = document.createElement('div'); content.className = 'content';
+          content.innerHTML = '<div class="thinking-dots"><span></span><span></span><span></span></div>';
+          wrap.appendChild(content);
+        } else {
+          wrap.className = 'message ' + (m.sender === 'user' ? 'user' : 'bot');
+          if (typeof m.text === 'string' && m.text.startsWith('```') && m.text.endsWith('```')) {
+            const content = m.text.slice(3,-3);
+            const modal = document.createElement('div'); modal.className = 'code-modal'; modal.textContent = content;
+            const btn = document.createElement('button'); btn.className = 'copy-btn'; btn.textContent = 'Copy';
+            btn.onclick = ()=>{ navigator.clipboard.writeText(content); btn.textContent='✔️'; setTimeout(()=>btn.textContent='Copy',1000); };
+            modal.appendChild(btn); wrap.appendChild(modal);
+          } else {
+            const c = document.createElement('div'); c.className = 'content'; c.textContent = m.text; wrap.appendChild(c);
+            if (m.sender === 'bot' && m.ts) {
+              const ts = document.createElement('div'); ts.className = 'timestamp';
+              const diff = Math.floor((Date.now() - m.ts) / 1000);
+              ts.textContent = diff < 60 ? `${diff}s` : `${Math.floor(diff/60)}m`;
+              wrap.appendChild(ts);
+            }
+          }
         }
-        [v0,v1]=[v1,v0];
-      }
-      return v0[bl];
+        chatBox.appendChild(wrap);
+      });
+      // ensure scroll stays at bottom inside chat-box
+      scrollToBottom();
     }
 
-    function findBestQA(userText){
-      if(!userText||qaPool.length===0) return null;
-      const normInput=normalizeText(userText);
-      for(const e of qaPool){
-        const qnorm=normalizeText(e.question||'');
-        if(qnorm&&qnorm===normInput) return {entry:e,type:'exact'};
+    // -------------------------
+    // Paste => immediate send (no maxlength)
+    // -------------------------
+    const chatForm = document.getElementById('chatForm');
+    textarea.addEventListener('paste', (e)=>{
+      // allow default paste then submit shortly after so textarea is populated
+      setTimeout(()=> {
+        const val = textarea.value;
+        if (!val || !val.trim()) return;
+        if (typeof chatForm.requestSubmit === 'function') chatForm.requestSubmit();
+        else chatForm.dispatchEvent(new Event('submit', { cancelable: true }));
+      }, 20);
+    });
+
+    // -------------------------
+    // Utility: robust extraction of assistant text from server response
+    // -------------------------
+    function collectStrings(value) {
+      if (value == null) return '';
+      if (typeof value === 'string') return value;
+      if (typeof value === 'number' || typeof value === 'boolean') return String(value);
+      if (Array.isArray(value)) return value.map(v => collectStrings(v)).join('');
+      if (typeof value === 'object') {
+        let out = '';
+        for (const k of Object.keys(value)) out += collectStrings(value[k]);
+        return out;
       }
-      for(const e of qaPool){
-        const qnorm=normalizeText(e.question||'');
-        if(qnorm.includes(normInput)||normInput.includes(qnorm)) return {entry:e,type:'include'};
+      return '';
+    }
+    function extractAssistantTextFromResp(j) {
+      if (!j) return null;
+      if (Array.isArray(j.choices) && j.choices.length) {
+        const c = j.choices[0];
+        if (c.message && typeof c.message.content === 'string' && c.message.content.trim()) return c.message.content.trim();
+        if (c.message && c.message.content) {
+          const s = collectStrings(c.message.content).trim();
+          if (s) return s;
+        }
+        if (typeof c.text === 'string' && c.text.trim()) return c.text.trim();
+        if (c.delta) {
+          const s3 = collectStrings(c.delta).trim();
+          if (s3) return s3;
+        }
+        try { return JSON.stringify(c).slice(0, 2000); } catch (e) { return null; }
       }
-      let best=null, bestScore=-1;
-      for(const e of qaPool){
-        const qnorm=normalizeText(e.question||''); if(!qnorm) continue;
-        const dist=levenshtein(normInput,qnorm);
-        const maxLen=Math.max(normInput.length,qnorm.length);
-        const sim=maxLen===0?1:(1-dist/maxLen);
-        if(sim>bestScore){bestScore=sim;best=e;}
-      }
-      if(best && bestScore>=0.50) return {entry:best,type:'fuzzy',score:bestScore};
+      if (typeof j.assistant === 'string' && j.assistant.trim()) return j.assistant.trim();
+      if (typeof j.text === 'string' && j.text.trim()) return j.text.trim();
+      const fallback = collectStrings(j).trim();
+      if (fallback) return fallback;
       return null;
     }
 
-    function produceAnswerFor(userText){
-      if(qaPool.length===0) return 'Grav pa wè sa poum diw';
-      const match=findBestQA(userText);
-      if(!match) return "Mwen pa wè sam ta diw la";
-      const answers = match.entry.answers || match.entry.responses || [];
-      if(answers.length===0) return "(Kesyon jwenn men pa gen repons nan JSON la.)";
-      return answers.join('\n');
+    // -------------------------
+    // Remove timestamps from UI (requirement #3)
+    // -------------------------
+    function removeAllTimestamps() {
+      const ts = chatBox.querySelectorAll('.timestamp');
+      ts.forEach(el => el.remove());
     }
 
-    // Build messages for OpenRouter from session history
-    function buildMessagesForOpenRouter(sessMessages, userText){
-      const sys = { role: 'system', content: 'You are TF-Chat, a helpful assistant.' };
-      const msgs=[sys];
-      const valid=(sessMessages||[]).filter(m=>m.sender==='user'||m.sender==='bot');
-      const tail=valid.slice(-8); // keep last pairs
-      for(const m of tail){
-        if(m.sender==='user') msgs.push({role:'user',content:m.text});
-        else msgs.push({role:'assistant',content:m.text});
-      }
-      msgs.push({role:'user',content:userText});
-      return msgs;
-    }
-
-    // Call proxy /openrouter
-    async function callOpenRouter(messages){
-      const body = {
-        model: 'openai/gpt-5',
-        messages: messages,
-        max_tokens: 512,
-        temperature: 0.2
-      };
-      const resp = await fetch('/openrouter', {
-        method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body)
-      });
-      if(!resp.ok){
-        const txt = await resp.text().catch(()=>null);
-        throw new Error('OpenRouter proxy error: '+resp.status+' '+(txt||''));
-      }
-      return resp.json();
-    }
-
-    // Form submit: try OpenRouter then fallback to local QA
-    document.getElementById('chatForm').addEventListener('submit', async (e)=>{
+    // -------------------------
+    // Submit flow: ALWAYS produce a bot reply (network fallback handled)
+    // -------------------------
+    chatForm.addEventListener('submit', async (e)=>{
       e.preventDefault();
-      let ta=document.getElementById('userInput'), text=ta.value.trim();
-      if(!text) return;
-      if(currentSession===null) newChat();
-      let sess=sessions[currentSession];
-      sess.messages.push({sender:'user',text,ts:Date.now()});
-      if(sess.messages[0] && typeof sess.messages[0].text === 'string') sess.title = sess.messages[0].text.slice(0,100);
-      save(); renderList(); renderBox(); ta.value='';
-      let thinking={sender:'thinking',text:'*TF-Chat*'};
-      sess.messages.push(thinking); renderBox();
+      const raw = textarea.value;
+      const text = (typeof raw === 'string') ? raw.trim() : '';
+      if (!text) return;
 
-      try{
-        const msgs = buildMessagesForOpenRouter(sess.messages, text);
-        const j = await callOpenRouter(msgs);
-        // remove thinking
-        sess.messages = sess.messages.filter(m=>m!==thinking);
+      // Requirement 3: remove timestamps when user sends next message
+      removeAllTimestamps();
+
+      if (currentSession === null) newChat();
+      const sess = sessions[currentSession];
+
+      // push user locally
+      sess.messages.push({ sender: 'user', text, ts: Date.now() });
+      if (sess.messages[0] && typeof sess.messages[0].text === 'string') sess.title = sess.messages[0].text.slice(0,100);
+      save(); renderList(); renderBox();
+
+      // clear input so user can continue pasting
+      textarea.value = '';
+
+      // add thinking bubble
+      const thinking = { sender: 'thinking', ts: Date.now() };
+      sess.messages.push(thinking); save(); renderBox();
+
+      let assistantPushed = false;
+
+      try {
+        // ensure user exists
+        let tfid = localStorage.getItem('tfid');
+        if (!tfid) {
+          const ru = await fetch('/user', { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({}) });
+          if (!ru.ok) throw new Error('/user failed');
+          const ju = await ru.json(); tfid = ju.tfid; localStorage.setItem('tfid', tfid);
+        }
+
+        // ensure session exists
+        let sessionId = localStorage.getItem('currentSessionId');
+        if (!sessionId) {
+          const rs = await fetch('/session', { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({ tfid }) });
+          if (!rs.ok) throw new Error('/session failed');
+          const js = await rs.json(); sessionId = js.sessionId; localStorage.setItem('currentSessionId', sessionId);
+        }
+
+        // call /message
+        const r = await fetch('/message', {
+          method: 'POST',
+          headers: {'Content-Type':'application/json'},
+          body: JSON.stringify({ tfid: localStorage.getItem('tfid'), sessionId: localStorage.getItem('currentSessionId'), text })
+        });
+
+        if (!r.ok) {
+          const txt = await r.text().catch(()=>null);
+          console.warn('/message returned not ok', r.status, txt && txt.slice ? txt.slice(0,200) : txt);
+          throw new Error('/message fail');
+        }
+
+        const jr = await r.json();
+        // remove thinking bubble locally
+        const idx = sess.messages.indexOf(thinking); if (idx > -1) sess.messages.splice(idx, 1);
+
         // extract assistant text robustly
         let assistantText = null;
-        if(j.choices && j.choices[0]){
-          const c = j.choices[0];
-          if(c.message && typeof c.message.content === 'string') assistantText = c.message.content;
-          else if(c.text) assistantText = c.text;
-          else if(c.message && Array.isArray(c.message.content)) assistantText = c.message.content.map(p=>p.text||'').join('');
+        if (jr && typeof jr.assistant === 'string' && jr.assistant.trim()) assistantText = jr.assistant.trim();
+        if (!assistantText && jr && jr.raw) assistantText = extractAssistantTextFromResp(jr.raw);
+        if (!assistantText && jr) assistantText = extractAssistantTextFromResp(jr);
+
+        if (!assistantText || !assistantText.trim()) assistantText = '(Repons pa klè)';
+
+        sess.messages.push({ sender: 'bot', text: assistantText, ts: Date.now() });
+        assistantPushed = true;
+        save(); renderBox();
+
+        if (document.hidden && Notification.permission === 'granted') new Notification('TF-Chat', { body: 'Nouvo mesaj TF-Chat' });
+
+      } catch (err) {
+        console.warn('Error sending message or parsing response, will fallback. Err:', err && err.message ? err.message : err);
+      } finally {
+        // ensure thinking removed
+        try {
+          const idx2 = sess.messages.findIndex(m => m.sender === 'thinking');
+          if (idx2 !== -1) sess.messages.splice(idx2, 1);
+        } catch(e){}
+
+        // if no assistant message was added, add fallback now
+        const lastBot = [...sess.messages].reverse().find(m => m.sender === 'bot');
+        if (!lastBot) {
+          sess.messages.push({ sender: 'bot', text: 'Repons la vini. (egzanp)', ts: Date.now() });
         }
-        if(!assistantText) assistantText = "(Repons pa klè)";
-        sess.messages.push({sender:'bot',text:assistantText,ts:Date.now()});
         save(); renderBox();
-        if(document.hidden && Notification.permission==='granted') new Notification('TF-Chat',{body:'Nouvo mesaj TF-Chat'});
-      }catch(err){
-        // fallback to local QA
-        console.warn('OpenRouter failed, fallback to local', err);
-        sess.messages = sess.messages.filter(m=>m!==thinking);
-        let botText = produceAnswerFor(text);
-        let botMsg = {sender:'bot',text:botText,ts:Date.now()};
-        sess.messages.push(botMsg);
-        save(); renderBox();
-        if(document.hidden&&Notification.permission==='granted') new Notification('TF-Chat',{body:'Nouvo mesaj TF-Chat'});
       }
     });
 
-    // Enter => newline (keep old behaviour)
-    document.getElementById('userInput').addEventListener('keydown', e=>{
-      if(e.key==='Enter' && !e.shiftKey){
+    // Enter + no Shift => insert newline (keep this behavior)
+    textarea.addEventListener('keydown', (e)=>{
+      if (e.key === 'Enter' && !e.shiftKey) {
         e.preventDefault();
-        let t=e.target, s=t.selectionStart, v=t.value;
-        t.value = v.slice(0,s) + '\n' + v.slice(s);
-        t.selectionStart = t.selectionEnd = s+1;
+        const s = textarea.selectionStart, v = textarea.value;
+        textarea.value = v.slice(0,s) + '\n' + v.slice(s);
+        textarea.selectionStart = textarea.selectionEnd = s+1;
       }
     });
 
-    // initial rendering
-    if(sessions.length) renderList(), renderBox();
-    loadIndexAndQA();
-    window.reloadQA = loadIndexAndQA;
- /* --- Client helper: user/session/message flow --- */
-const API_BASE = ''; // empty => same origin (https://adamdh7ai.onrender.com)
-
-/** Ensure we have a TFID in localStorage, otherwise create one on server */
-async function ensureUser(name = null) {
-  let tf = localStorage.getItem('tfid');
-  if (tf) {
-    // verify server knows it (optional)
-    const r = await fetch(API_BASE + '/user', {
-      method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({ tfid: tf })
-    });
-    if (r.ok) {
-      const j = await r.json();
-      return j.tfid;
-    }
-    // if server doesn't know it, drop and recreate
-    localStorage.removeItem('tfid');
-  }
-
-  // create new user
-  const resp = await fetch(API_BASE + '/user', {
-    method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({ name })
-  });
-  if (!resp.ok) throw new Error('user create failed: ' + resp.status);
-  const j = await resp.json();
-  localStorage.setItem('tfid', j.tfid);
-  return j.tfid;
-}
-
-/** Create a new session for current TFID and store it */
-async function createSessionForCurrentUser() {
-  const tfid = await ensureUser();
-  const resp = await fetch(API_BASE + '/session', {
-    method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({ tfid })
-  });
-  if (!resp.ok) {
-    const t = await resp.text().catch(()=>null);
-    throw new Error('create session failed: ' + resp.status + ' ' + (t||''));
-  }
-  const j = await resp.json();
-  localStorage.setItem('currentSessionId', j.sessionId);
-  return j.sessionId;
-}
-
-/** Send a message (uses tfid and currentSessionId) */
-async function sendMessage(text) {
-  const tfid = localStorage.getItem('tfid') || await ensureUser();
-  let sessionId = localStorage.getItem('currentSessionId');
-  if (!sessionId) {
-    sessionId = await createSessionForCurrentUser();
-  }
-
-  // append user in UI
-  addMessageToUI(text, 'user');
-
-  // show thinking
-  const thinkingEl = addMessageToUI('*TF-Chat — en cours...*', 'bot', true);
-
-  try {
-    const resp = await fetch(API_BASE + '/message', {
-      method: 'POST',
-      headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify({ tfid, sessionId, text })
-    });
-    if (!resp.ok) {
-      const txt = await resp.text().catch(()=>null);
-      throw new Error('server returned ' + resp.status + ' — ' + (txt||''));
-    }
-    const j = await resp.json();
-    // remove thinking
-    thinkingEl.remove();
-    // show assistant answer
-    addMessageToUI(j.assistant || '(Repons pa klè)', 'bot');
-  } catch (err) {
-    thinkingEl.remove();
-    console.error(err);
-    addMessageToUI('Erè: ' + err.message, 'bot');
-  }
-}
-
-/* Simple UI helpers (use your existing append/render functions instead) */
-function addMessageToUI(text, who='bot', isThinking=false){
-  const box=document.getElementById('chatBox');
-  const wrap=document.createElement('div');
-  wrap.className = isThinking ? 'thinking' : 'message ' + (who==='user' ? 'user' : 'bot');
-  if(isThinking){
-    wrap.textContent = text;
-    box.appendChild(wrap);
-    box.scrollTop = box.scrollHeight;
-    return wrap;
-  }
-  if(typeof text === 'string' && text.startsWith('```') && text.endsWith('```')){
-    const content = text.slice(3,-3);
-    const modal = document.createElement('div');
-    modal.className = 'code-modal';
-    modal.textContent = content;
-    const btn = document.createElement('button');
-    btn.className='copy-btn'; btn.textContent='Copy';
-    btn.onclick = ()=>{ navigator.clipboard.writeText(content); btn.textContent='✔️'; setTimeout(()=>btn.textContent='Copy',1000); };
-    modal.appendChild(btn);
-    wrap.appendChild(modal);
-  } else {
-    const c=document.createElement('div'); c.className='content'; c.textContent=text; wrap.appendChild(c);
-  }
-  box.appendChild(wrap);
-  box.scrollTop = box.scrollHeight;
-  return wrap;
-}
-
-/* Hook into your form submit */
-const chatForm = document.getElementById('chatForm');
-if(chatForm){
-  chatForm.addEventListener('submit', async (e)=>{
-    e.preventDefault();
-    const ta = document.getElementById('userInput');
-    const text = ta.value.trim();
-    if(!text) return;
-    ta.value = '';
-    // disable button while sending
-    const btn = chatForm.querySelector('button[type="submit"]');
-    if(btn){ btn.disabled=true; btn.style.opacity='0.7'; }
-    try {
-      await sendMessage(text);
-    } catch(e) {
-      console.error(e);
-    } finally {
-      if(btn){ btn.disabled=false; btn.style.opacity='1'; }
-    }
-  });
-}
-
-/* When page loads, ensure user exists (silent) and create an initial session */
-window.addEventListener('load', async ()=>{
-  try {
-    await ensureUser();
-    // optionally create a session now:
-    if(!localStorage.getItem('currentSessionId')){
-      await createSessionForCurrentUser();
-    }
-  } catch(e){
-    console.warn('init user/session failed', e);
-  }
-});
+    // On load: render saved sessions
+    if (sessions.length) renderList(), renderBox();
+    adjustLayoutForViewport();
   </script>
-  
 </body>
   </html>
