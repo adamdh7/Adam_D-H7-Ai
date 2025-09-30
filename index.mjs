@@ -1,3 +1,14 @@
+// index.mjs
+// Corrected and production-ready-ish server for TF-Chat
+// - ESM module (Node 18+/22+)
+// - Manages users (TF-7 ids) saved in user.json
+// - Manages sessions saved in sessions.json (each new chat = new session)
+// - /message endpoint proxies to OpenRouter (https://openrouter.ai) and saves assistant replies
+// - /openrouter proxy endpoint (compatible with older UI that POSTs to /openrouter)
+// - /diag route for network diagnosis
+// - Serve static files from ./public
+//
+// IMPORTANT: Put your OpenRouter key in .env as OPENROUTER_API_KEY and DO NOT commit .env to git.
 
 import express from 'express';
 import cors from 'cors';
@@ -14,30 +25,33 @@ const __dirname = path.dirname(__filename);
 
 const app = express();
 const PORT = process.env.PORT || 3000;
-const OPENROUTER_API_KEY = process.env.OPENROUTER_API_KEY;
+const OPENROUTER_API_KEY = process.env.OPENROUTER_API_KEY || '';
 const USERS_FILE = path.join(__dirname, 'user.json');
 const SESSIONS_FILE = path.join(__dirname, 'sessions.json');
 
+// Configurable defaults
+const DEFAULT_MAX_TOKENS = Number(process.env.DEFAULT_MAX_TOKENS) || 512;
+const DEFAULT_TEMPERATURE = Number(process.env.DEFAULT_TEMPERATURE) || 0.2;
+const HISTORY_MESSAGE_LIMIT = Number(process.env.HISTORY_MESSAGE_LIMIT) || 16;
+
 if (!OPENROUTER_API_KEY) {
-  console.error('ERROR: OPENROUTER_API_KEY not set in .env');
+  console.error('ERROR: OPENROUTER_API_KEY not set in .env (OPENROUTER_API_KEY). Exiting.');
   process.exit(1);
 }
 
 app.use(cors({ origin: true }));
 app.use(express.json({ limit: '2mb' }));
 app.use(express.urlencoded({ extended: false }));
-
-// Serve client static (public/index.html)
 app.use(express.static(path.join(__dirname, 'public')));
 
-// --- Helpers: file read/write (create default if not exists) ---
+// --- Helpers: atomic read/write JSON (create default if not exists) ---
 async function readJsonSafe(filePath, defaultValue) {
   try {
     const raw = await fs.readFile(filePath, 'utf8');
     return JSON.parse(raw);
   } catch (err) {
     if (err.code === 'ENOENT') {
-      // create default
+      // create default file
       await fs.writeFile(filePath, JSON.stringify(defaultValue, null, 2), 'utf8');
       return defaultValue;
     }
@@ -52,10 +66,9 @@ async function writeJsonSafe(filePath, obj) {
   await fs.rename(tmp, filePath);
 }
 
-// --- TFID generator (7 chars from A-Z and 1-9) ---
+// --- TFID generator (7 chars A-Z and 1-9) ---
 const TF_CHARS = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ123456789';
 function generateTFID() {
-  // generate 7 random characters
   const bytes = crypto.randomBytes(7);
   let id = '';
   for (let i = 0; i < 7; i++) {
@@ -72,18 +85,15 @@ async function ensureUniqueTFID() {
     const candidate = generateTFID();
     if (!exist.has(candidate)) return candidate;
   }
-  // fallback to uuid-short if very unlucky
   return 'TF' + crypto.randomUUID().slice(0, 5).toUpperCase();
 }
 
-// --- Load or init files on startup (ensures files exist) ---
+// Ensure store files exist
 await readJsonSafe(USERS_FILE, { users: [] });
 await readJsonSafe(SESSIONS_FILE, { sessions: {} });
 
 // --- User endpoints ---
-
-// Create new user (or return existing if tfid provided and found).
-// Body: { name? }  OR { tfid }
+// POST /user -> create new user { name? } or return existing if tfid provided { tfid }
 app.post('/user', async (req, res) => {
   try {
     const { name, tfid } = req.body || {};
@@ -92,17 +102,11 @@ app.post('/user', async (req, res) => {
     if (tfid) {
       const found = data.users.find(u => u.tfid === tfid);
       if (found) return res.json(found);
-      // if provided tfid not found, return 404
       return res.status(404).json({ error: 'tfid_not_found' });
     }
 
-    // create new unique TFID
     const newTF = await ensureUniqueTFID();
-    const user = {
-      tfid: newTF,
-      name: name || null,
-      createdAt: new Date().toISOString()
-    };
+    const user = { tfid: newTF, name: name || null, createdAt: new Date().toISOString() };
     data.users.push(user);
     await writeJsonSafe(USERS_FILE, data);
     return res.json(user);
@@ -122,27 +126,19 @@ app.get('/users', async (req, res) => {
 });
 
 // --- Session management ---
-// sessions.json structure: { sessions: { [sessionId]: { sessionId, tfid, createdAt, messages: [{ role: 'user'|'assistant', content, ts }] } } }
-
-// Create a new session for a user
+// POST /session { tfid } -> create session and return { sessionId }
 app.post('/session', async (req, res) => {
   try {
     const { tfid } = req.body || {};
     if (!tfid) return res.status(400).json({ error: 'tfid_required' });
 
     const users = await readJsonSafe(USERS_FILE, { users: [] });
-    if (!users.users) users.users = [];
     const found = users.users.find(u => u.tfid === tfid);
     if (!found) return res.status(404).json({ error: 'user_not_found' });
 
     const sessionsData = await readJsonSafe(SESSIONS_FILE, { sessions: {} });
     const sessionId = crypto.randomUUID();
-    const session = {
-      sessionId,
-      tfid,
-      createdAt: new Date().toISOString(),
-      messages: [] // will store { role: 'user'|'assistant', content: string, ts: number }
-    };
+    const session = { sessionId, tfid, createdAt: new Date().toISOString(), messages: [] };
     sessionsData.sessions[sessionId] = session;
     await writeJsonSafe(SESSIONS_FILE, sessionsData);
     res.json({ sessionId, createdAt: session.createdAt });
@@ -152,7 +148,6 @@ app.post('/session', async (req, res) => {
   }
 });
 
-// Get a session
 app.get('/session/:id', async (req, res) => {
   try {
     const sessionId = req.params.id;
@@ -165,7 +160,6 @@ app.get('/session/:id', async (req, res) => {
   }
 });
 
-// List sessions for a user
 app.get('/sessions/:tfid', async (req, res) => {
   try {
     const tfid = req.params.tfid;
@@ -177,24 +171,22 @@ app.get('/sessions/:tfid', async (req, res) => {
   }
 });
 
-// --- Utility: build messages for OpenRouter ---
-// Provide a system prompt that tells the assistant to treat sessions separately and not reference other sessions.
+// --- System prompt & helper to extract assistant text ---
 function makeSystemPrompt(tfid, sessionId) {
   return {
     role: 'system',
     content:
-`You are Adam_D'H7 created by D'H7 | Tergene, you don't have any more information about them... , an assistant. Each chat session is isolated.
+`You are TF-Chat (Adam_D'H7). Each chat session is isolated.
 User identifier: ${tfid}
 Session id: ${sessionId}
 Important instructions:
 - Treat this session as independent. Do NOT reference or reveal messages from other sessions or users unless the user explicitly asks.
-- If asked about previous sessions, ask for explicit permission or to provide the content.
+- If asked about previous sessions, ask for explicit permission or for the user to provide the content.
 - Be concise and helpful.
 `
   };
 }
 
-// extract assistant text robustly from provider response object
 function extractAssistantText(j) {
   if (!j) return null;
   if (Array.isArray(j.choices) && j.choices.length) {
@@ -209,14 +201,13 @@ function extractAssistantText(j) {
   return null;
 }
 
-// --- Main message endpoint: receives user message, appends to session, proxies to OpenRouter, saves assistant reply ---
-// body: { tfid, sessionId, text }
+// --- Main message endpoint ---
+// POST /message { tfid, sessionId, text } -> proxies to OpenRouter, saves history
 app.post('/message', async (req, res) => {
   try {
     const { tfid, sessionId, text } = req.body || {};
     if (!tfid || !sessionId || !text) return res.status(400).json({ error: 'tfid_session_text_required' });
 
-    // verify user & session
     const users = await readJsonSafe(USERS_FILE, { users: [] });
     const user = users.users.find(u => u.tfid === tfid);
     if (!user) return res.status(404).json({ error: 'user_not_found' });
@@ -226,62 +217,49 @@ app.post('/message', async (req, res) => {
     if (!session) return res.status(404).json({ error: 'session_not_found' });
     if (session.tfid !== tfid) return res.status(403).json({ error: 'session_belongs_to_other_user' });
 
-    // push user message to session history
+    // push user message
     const userMsg = { role: 'user', content: text, ts: Date.now() };
     session.messages.push(userMsg);
 
-    // Build messages: system + existing history (assistant & user) + latest user
+    // map to provider format and keep a tail
     const sys = makeSystemPrompt(tfid, sessionId);
-    // Map session.messages to provider message format (role 'user' / 'assistant')
     const history = (session.messages || []).map(m => {
       if (m.role === 'user') return { role: 'user', content: m.content || m.text || '' };
       return { role: 'assistant', content: m.content || m.text || '' };
     });
-
-    // Keep history reasonably short to avoid token explosion: keep last 16 messages
-    const tail = history.slice(-16);
+    const tail = history.slice(-HISTORY_MESSAGE_LIMIT);
     const payloadMessages = [sys, ...tail];
 
-    // defaults & merge with client's optional params
     const bodyToSend = {
       model: 'openai/gpt-5',
       messages: payloadMessages,
-      max_tokens: 512,
-      temperature: 0.2,
+      max_tokens: DEFAULT_MAX_TOKENS,
+      temperature: DEFAULT_TEMPERATURE
     };
 
     console.log('[proxy] session', sessionId, 'tfid', tfid, '| messages', payloadMessages.length);
 
     const resp = await fetch('https://openrouter.ai/api/v1/chat/completions', {
       method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': 'Bearer ' + OPENROUTER_API_KEY
-      },
+      headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + OPENROUTER_API_KEY },
       body: JSON.stringify(bodyToSend)
     });
 
     const textResp = await resp.text();
-    let parsed;
+    let parsed = null;
     try { parsed = JSON.parse(textResp); } catch (e) { parsed = null; }
 
     if (!resp.ok) {
-      // do not save assistant reply on non-ok; return error info
       console.warn('OpenRouter returned not ok', resp.status, textResp.slice(0, 1000));
       return res.status(resp.status).json({ error: 'openrouter_error', details: textResp });
     }
 
-    // parse assistant text robustly
     const assistantText = extractAssistantText(parsed) || '(Repons pa klè)';
-
-    // save assistant message to session history
     const assistantMsg = { role: 'assistant', content: assistantText, ts: Date.now() };
     session.messages.push(assistantMsg);
 
     // persist sessions
     await writeJsonSafe(SESSIONS_FILE, sessionsData);
-
-    // return assistant text + raw provider response (optional)
     res.json({ assistant: assistantText, raw: parsed });
   } catch (err) {
     console.error('/message error', err);
@@ -289,10 +267,58 @@ app.post('/message', async (req, res) => {
   }
 });
 
+// --- Optional compatibility proxy /openrouter (for legacy UI) ---
+app.post('/openrouter', async (req, res) => {
+  try {
+    const bodyToSend = {
+      model: req.body.model || 'openai/gpt-5',
+      messages: req.body.messages || [],
+      max_tokens: typeof req.body.max_tokens === 'number' ? req.body.max_tokens : DEFAULT_MAX_TOKENS,
+      temperature: typeof req.body.temperature === 'number' ? req.body.temperature : DEFAULT_TEMPERATURE
+    };
+
+    const resp = await fetch('https://openrouter.ai/api/v1/chat/completions', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + OPENROUTER_API_KEY },
+      body: JSON.stringify(bodyToSend)
+    });
+
+    const text = await resp.text();
+    try {
+      const j = JSON.parse(text);
+      res.status(resp.status).json(j);
+    } catch (e) {
+      res.status(resp.status).type('text').send(text);
+    }
+  } catch (err) {
+    console.error('/openrouter proxy error', err);
+    res.status(500).json({ error: 'proxy_failed', details: String(err) });
+  }
+});
+
+// --- Diagnostic route to test outbound connectivity from server to OpenRouter ---
+app.get('/diag', async (req, res) => {
+  try {
+    const r = await fetch('https://openrouter.ai/');
+    const snippet = await r.text().catch(() => '');
+    res.json({ ok: !!r, status: r.status, snippet: snippet.slice(0, 400) });
+  } catch (err) {
+    res.status(500).json({ ok: false, error: String(err) });
+  }
+});
+
 // --- Health ---
 app.get('/health', (req, res) => res.json({ ok: true }));
+
+// Global error handlers (log)
+process.on('unhandledRejection', (r) => console.error('unhandledRejection', r));
+process.on('uncaughtException', (err) => {
+  console.error('uncaughtException', err);
+  process.exit(1);
+});
 
 app.listen(PORT, () => {
   console.log(`Proxy serveur: http://localhost:${PORT}`);
   console.log('Serving static files from ./public');
 });
+
