@@ -20,7 +20,8 @@ const USERS_FILE = path.join(__dirname, 'user.json');
 const SESSIONS_FILE = path.join(__dirname, 'sessions.json');
 
 // Configurable defaults
-const DEFAULT_MAX_TOKENS = Number(process.env.DEFAULT_MAX_TOKENS) || 512;
+// Lower default to a safer value to avoid 402 on small/free accounts
+const DEFAULT_MAX_TOKENS = Number(process.env.DEFAULT_MAX_TOKENS) || 400;
 const DEFAULT_TEMPERATURE = Number(process.env.DEFAULT_TEMPERATURE) || 0.2;
 const HISTORY_MESSAGE_LIMIT = Number(process.env.HISTORY_MESSAGE_LIMIT) || 16;
 
@@ -144,7 +145,7 @@ app.post('/session', async (req, res) => {
       sessionId,
       tfid,
       createdAt: new Date().toISOString(),
-      messages: [] // will store { role: 'user'|'assistant', content: string, ts: number }
+      messages: [] // will store { role: 'user', content: string, ts: number }
     };
     sessionsData.sessions[sessionId] = session;
     await writeJsonSafe(SESSIONS_FILE, sessionsData);
@@ -233,6 +234,87 @@ function extractAssistantText(j) {
   return null;
 }
 
+// --- Helper: parse allowed tokens from OpenRouter 402-like error message ---
+function parseAllowedTokensFromErrorText(text) {
+  if (!text) return null;
+  // common pattern: "you requested up to 512 tokens, but can only afford 441"
+  let m = text.match(/can only afford\s*(\d+)/i);
+  if (m && m[1]) return Number(m[1]);
+  m = text.match(/afford\s*(\d+)/i);
+  if (m && m[1]) return Number(m[1]);
+  // another pattern: "maximum allowed is 441"
+  m = text.match(/maximum.*?(\d+)/i);
+  if (m && m[1]) return Number(m[1]);
+  return null;
+}
+
+// --- Helper: send to OpenRouter with simple fallback adjustments on 402 ---
+async function postToOpenRouterWithFallback(body, maxRetries = 2) {
+  const url = 'https://openrouter.ai/api/v1/chat/completions';
+
+  let attempt = 0;
+  let currentBody = { ...body };
+
+  while (attempt <= maxRetries) {
+    attempt++;
+    try {
+      console.log(`[openrouter] attempt ${attempt} max_tokens=${currentBody.max_tokens}`);
+      const resp = await fetch(url, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': 'Bearer ' + OPENROUTER_API_KEY
+        },
+        body: JSON.stringify(currentBody)
+      });
+
+      const textResp = await resp.text();
+      let parsed = null;
+      try { parsed = JSON.parse(textResp); } catch (e) { parsed = null; }
+
+      if (resp.ok) {
+        return { ok: true, status: resp.status, parsed, rawText: textResp };
+      }
+
+      // if payment / limit error (402), try to reduce max_tokens and retry once or twice
+      if (resp.status === 402) {
+        console.warn('[openrouter] 402 - will try to reduce max_tokens and retry if possible. Response snippet:', textResp.slice(0, 800));
+        const allowed = parseAllowedTokensFromErrorText(textResp);
+        // compute new max: prefer allowed - 20 (safety), but never exceed currentBody.max_tokens
+        let newMax = null;
+        if (allowed && typeof allowed === 'number') {
+          newMax = Math.max(1, Math.min(currentBody.max_tokens - 1, allowed - 20));
+        } else {
+          // fallback: reduce to 75% of current max, or to DEFAULT_MAX_TOKENS if current was higher than default
+          newMax = Math.max(1, Math.floor(currentBody.max_tokens * 0.75));
+          if (newMax > DEFAULT_MAX_TOKENS) newMax = DEFAULT_MAX_TOKENS;
+        }
+
+        // if reduction is meaningful, retry
+        if (newMax < currentBody.max_tokens) {
+          currentBody = { ...currentBody, max_tokens: newMax };
+          // small delay before retry to avoid quick hammer
+          await new Promise(r => setTimeout(r, 250));
+          continue; // retry loop
+        }
+
+        // can't meaningfully reduce -> return the 402 response back
+        return { ok: false, status: resp.status, parsed, rawText: textResp };
+      }
+
+      // other non-ok statuses: return as-is
+      return { ok: false, status: resp.status, parsed, rawText: textResp };
+
+    } catch (err) {
+      console.error('[openrouter] network/exception on attempt', attempt, err);
+      if (attempt > maxRetries) return { ok: false, error: String(err) };
+      await new Promise(r => setTimeout(r, 200));
+    }
+  }
+
+  return { ok: false, error: 'exhausted_retries' };
+}
+
 // --- Main message endpoint: receives user message, appends to session, proxies to OpenRouter, saves assistant reply ---
 // body: { tfid, sessionId, text }
 app.post('/message', async (req, res) => {
@@ -267,39 +349,35 @@ app.post('/message', async (req, res) => {
     const payloadMessages = [sys, ...tail];
 
     // defaults & merge with client's optional params
-    const bodyToSend = {
+    let bodyToSend = {
       model: 'openai/gpt-5',
       messages: payloadMessages,
       max_tokens: DEFAULT_MAX_TOKENS,
       temperature: DEFAULT_TEMPERATURE,
     };
 
-    console.log('[proxy] session', sessionId, 'tfid', tfid, '| messages', payloadMessages.length);
+    console.log('[proxy] session', sessionId, 'tfid', tfid, '| messages', payloadMessages.length, 'initial_max_tokens', bodyToSend.max_tokens);
 
-    const resp = await fetch('https://openrouter.ai/api/v1/chat/completions', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': 'Bearer ' + OPENROUTER_API_KEY
-      },
-      body: JSON.stringify(bodyToSend)
-    });
+    // use the helper that will retry with reduced max_tokens on 402
+    const result = await postToOpenRouterWithFallback(bodyToSend, 2);
 
-    const textResp = await resp.text();
-    let parsed;
-    try { parsed = JSON.parse(textResp); } catch (e) { parsed = null; }
-
-    if (!resp.ok) {
-      // do not save assistant reply on non-ok; return error info
-      console.warn('OpenRouter returned not ok', resp.status, textResp.slice(0, 1000));
-      return res.status(resp.status).json({ error: 'openrouter_error', details: textResp });
+    if (!result.ok) {
+      // return helpful error message (include rawText snippet)
+      const snippet = (result.rawText || result.parsed || result.error || '').toString().slice(0, 1000);
+      console.warn('[proxy] OpenRouter final failure', result.status, snippet);
+      // Do not persist assistant reply on failure; session already has user message saved.
+      if (result.status === 402) {
+        return res.status(402).json({ error: 'openrouter_insufficient_credits', details: snippet });
+      }
+      return res.status(result.status || 500).json({ error: 'openrouter_error', details: snippet });
     }
 
+    const parsed = result.parsed;
     // parse assistant text robustly
     const assistantText = extractAssistantText(parsed) || '(Repons pa klè)';
 
     // if extraction failed, log snippet for debugging
-    if (assistantText === 'Repons ou an pa trò klè') {
+    if (assistantText === '(Repons pa klè)') {
       console.warn('extractAssistantText failed to find text. Parsed response keys:', Object.keys(parsed || {}));
       try { console.warn('Parsed snippet:', JSON.stringify(parsed).slice(0, 2000)); } catch (e) { /* ignore */ }
     }
@@ -329,19 +407,18 @@ app.post('/openrouter', async (req, res) => {
       temperature: typeof req.body.temperature === 'number' ? req.body.temperature : DEFAULT_TEMPERATURE
     };
 
-    const resp = await fetch('https://openrouter.ai/api/v1/chat/completions', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + OPENROUTER_API_KEY },
-      body: JSON.stringify(bodyToSend)
-    });
-
-    const text = await resp.text();
-    try {
-      const j = JSON.parse(text);
-      res.status(resp.status).json(j);
-    } catch (e) {
-      res.status(resp.status).type('text').send(text);
+    const result = await postToOpenRouterWithFallback(bodyToSend, 2);
+    if (!result.ok) {
+      const snippet = (result.rawText || result.parsed || result.error || '').toString().slice(0, 1000);
+      if (result.status === 402) return res.status(402).json({ error: 'openrouter_insufficient_credits', details: snippet });
+      return res.status(result.status || 500).json({ error: 'openrouter_error', details: snippet });
     }
+
+    // if parsed JSON is available, forward it
+    if (result.parsed) return res.status(result.status).json(result.parsed);
+    // otherwise forward raw text
+    return res.status(result.status).type('text').send(result.rawText);
+
   } catch (err) {
     console.error('/openrouter proxy error', err);
     res.status(500).json({ error: 'proxy_failed', details: String(err) });
