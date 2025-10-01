@@ -35,9 +35,10 @@ const RECOVERY_MAX_TOKENS_CAP = Number(process.env.RECOVERY_MAX_TOKENS_CAP) || 5
 // Useful if you want server-side internal marker handling; set ENABLE_MARKER=false in .env to disable.
 const ENABLE_MARKER = process.env.ENABLE_MARKER ? process.env.ENABLE_MARKER === 'true' : true;
 
-// Reflection pauses (ms) — set to 0 to avoid simulated thinking text
-const THINK_PROMPT_MS = Number(process.env.THINK_PROMPT_MS) || 0;
-const THINK_MESSAGES_MS = Number(process.env.THINK_MESSAGES_MS) || 0;
+// Reflection pauses (ms) — re-enabled here to 2000ms so the model "reads" the prompt/messages.
+// You can override by setting THINK_PROMPT_MS/THINK_MESSAGES_MS in your .env.
+const THINK_PROMPT_MS = Number(process.env.THINK_PROMPT_MS) || 2000;
+const THINK_MESSAGES_MS = Number(process.env.THINK_MESSAGES_MS) || 2000;
 
 const TF_CHARS = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz123456789';
 const USERS_FILE = path.join(__dirname, 'user.json');
@@ -623,7 +624,7 @@ app.post('/message', async (req, res) => {
     // Final payload: system instructions, background context, then the user's current message LAST
     const payloadMessages = [systemMsg, contextSystemMsg, prioritySystemMsg, { role: 'user', content: clean }];
 
-    // ---------- REFLECTION PAUSES (disabled by default in this build) ----------
+    // ---------- REFLECTION PAUSES (enabled at 2s by default in this build) ----------
     if (THINK_PROMPT_MS > 0) {
       await sleep(THINK_PROMPT_MS);
     }
@@ -775,4 +776,4 @@ function localFallbackUsingBank(userInput) {
   const best = findBestBankPhrase(userInput);
   if (best) return best;
   return localFallback(userInput);
-}
+                               }
