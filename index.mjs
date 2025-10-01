@@ -21,7 +21,7 @@ const SESSIONS_FILE = path.join(__dirname, 'sessions.json');
 
 // Configurable defaults
 // Lower default to a safer value to avoid 402 on small/free accounts
-const DEFAULT_MAX_TOKENS = Number(process.env.DEFAULT_MAX_TOKENS) || 400;
+const DEFAULT_MAX_TOKENS = Number(process.env.DEFAULT_MAX_TOKENS) || 170;
 const DEFAULT_TEMPERATURE = Number(process.env.DEFAULT_TEMPERATURE) || 0.2;
 const HISTORY_MESSAGE_LIMIT = Number(process.env.HISTORY_MESSAGE_LIMIT) || 16;
 
@@ -193,7 +193,7 @@ Session id: ${sessionId}
 Important instructions:
 - Treat this session as independent. Do NOT reference or reveal messages from other sessions or users unless the user explicitly asks.
 - If asked about previous sessions, ask for explicit permission or to provide the content.
-- Be concise and helpful. think think improve your answers only after send it.
+- Be concise and helpful. think think improve your answers only after send it. You only need to send the final message, the perfect one so as not to cause bugs. You think about it, you check if there are no errors and you send the perfect message according to you. 
 `
   };
 }
