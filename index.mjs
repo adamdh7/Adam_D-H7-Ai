@@ -193,17 +193,7 @@ function extractAssistantText(payloadJson) {
   }
   return null;
 }
-// Si l'utilisateur a demandé une explication structurée, injecter un message
-// clair (résumé des étapes) en tant que contrainte utilisateur. IMPORTANT:
-// on demande une explication factuelle/structurée, pas un "internal chain-of-thought".
-if (explainMode) {
-  const explainInstruction = {
-    role: 'user',
-    content: `Please provide a clear, step-by-step explanation of your answer. Use short numbered steps or bullet points. Do NOT reveal internal chain-of-thought, private self-talk, or internal deliberation — only present a concise summary of the method, assumptions, and key steps. Finish your sentences.`
-  };
-  // on place la consigne juste avant le dernier user message (ou à la fin si tu préfères)
-  payloadMessages.push(explainInstruction);
-}
+
 // --- fetch wrapper with timeout ---
 async function fetchWithTimeout(url, options = {}, timeoutMs = DEFAULT_TIMEOUT_MS) {
   const controller = new AbortController();
