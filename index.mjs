@@ -14,14 +14,15 @@ const __dirname = path.dirname(__filename);
 
 const app = express();
 
-// Config (via .env)
+/* ---------------------------
+   Configuration & constantes
+   --------------------------- */
 const PORT = Number(process.env.PORT) || 3000;
 const OPENROUTER_API_KEY = process.env.OPENROUTER_API_KEY;
 const OPENROUTER_ENDPOINT = process.env.OPENROUTER_ENDPOINT || 'https://openrouter.ai/api/v1/chat/completions';
 const OPENROUTER_MODEL = process.env.OPENROUTER_MODEL || 'gpt-5';
 const HISTORY_TAIL = Number(process.env.HISTORY_TAIL) || 27;
 
-// Increased defaults to reduce "incomplete" replies
 const DEFAULT_MAX_TOKENS = Number(process.env.DEFAULT_MAX_TOKENS) || 100;
 const DEFAULT_TIMEOUT_MS = Number(process.env.DEFAULT_TIMEOUT_MS) || 30000;
 const MAX_RETRIES = Number(process.env.MAX_RETRIES) || 3;
@@ -30,10 +31,19 @@ const DEFAULT_USER_NAME = process.env.DEFAULT_USER_NAME || "User";
 const MAX_ALLOWED_TOKENS = Number(process.env.MAX_ALLOWED_TOKENS) || 200;
 const RECOVERY_MAX_TOKENS_CAP = Number(process.env.RECOVERY_MAX_TOKENS_CAP) || 50;
 
+// Toggle marker behavior via .env (string "true" enables it).
+// For correct "***Terminé***" handling default is true.
+const ENABLE_MARKER = process.env.ENABLE_MARKER ? process.env.ENABLE_MARKER === 'true' : true;
+
+// Reflection pauses (ms) — default 2s each as requested
+const THINK_PROMPT_MS = Number(process.env.THINK_PROMPT_MS) || 2000;   // lire prompt pendant 2s
+const THINK_MESSAGES_MS = Number(process.env.THINK_MESSAGES_MS) || 2000; // lire messages pendant 2s
+
 const TF_CHARS = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz123456789';
 const USERS_FILE = path.join(__dirname, 'user.json');
 const SESSIONS_FILE = path.join(__dirname, 'sessions.json');
 const USER_HISTORY_FILE = path.join(__dirname, 'user_history.json');
+const PHRASE_BANK_FILE = path.join(__dirname, 'phrasebank.json');
 
 if (!OPENROUTER_API_KEY) {
   console.error('ERROR: OPENROUTER_API_KEY missing in .env');
@@ -45,14 +55,16 @@ app.use(express.json({ limit: '70mb' }));
 app.use(express.urlencoded({ extended: false }));
 app.use(express.static(path.join(__dirname, 'public')));
 
-// --- file helpers ---
+/* ---------------------------
+   Helpers: fichiers JSON safe
+   --------------------------- */
 async function readJsonSafe(filePath, defaultValue) {
   try {
     const raw = await fs.readFile(filePath, 'utf8');
     return JSON.parse(raw);
   } catch (err) {
     if (err && err.code === 'ENOENT') {
-      try { await fs.writeFile(filePath, JSON.stringify(defaultValue, null, 2), 'utf8'); } catch(e) {}
+      try { await fs.writeFile(filePath, JSON.stringify(defaultValue, null, 2), 'utf8'); } catch (e) {}
       return defaultValue;
     }
     throw err;
@@ -65,7 +77,16 @@ async function writeJsonSafe(filePath, obj) {
   await fs.rename(tmp, filePath);
 }
 
-// --- TFID generator ---
+/* ---------------------------
+   Sleep helper
+   --------------------------- */
+function sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+/* ---------------------------
+   TFID generator
+   --------------------------- */
 function generateTFIDRaw(len = 7) {
   const bytes = crypto.randomBytes(len);
   let id = '';
@@ -82,103 +103,271 @@ async function ensureUniqueTFID() {
   return 'TF-' + crypto.randomUUID().slice(0,7).toUpperCase();
 }
 
-// init files
-await readJsonSafe(USERS_FILE, { users: [] });
-await readJsonSafe(SESSIONS_FILE, { sessions: {} });
-await readJsonSafe(USER_HISTORY_FILE, { histories: {} });
+/* ---------------------------
+   MARKER helpers (internal)
+   --------------------------- */
+// Marker is INTERNAL only. It marks end of internal reasoning and start of visible reply.
+const MARKER = '***Terminé***';
 
-// --- SYSTEM PROMPT (neutral, strict about meta/text) ---
-// VERY IMPORTANT: Do not output internal planning, chain-of-thought, or meta-comments.
-// If the user requests code, output only the requested code snippet/file without extra commentary.
-function makeSystemPrompt(tfid, sessionId, userName = null) {
-  const display = userName || DEFAULT_USER_NAME || tfid;
-  return {
-    role: 'system',
-    content: `You are a Adam_D'H7 created by D'H7 | Tergene you don't have more information on them, neutral assistant for ${display}. Session: ${sessionId}
-
-Rules for every response (strict):
-- Reply in the user's language by default.
-- Never produce internal chain-of-thought, planning, or meta-comments.
-  Examples of forbidden text: lines starting with "Generating", "Creating", "I need", "I should", "I'll", "I'm going to", "Je vais", "Je dois", "**", or any self-dialogue.
-- If the assistant would otherwise produce planning/meta text, instead produce only the final answer.
-- If the user requests code, return the code only (in a code block) and no extra preface or commentary, unless the user explicitly asked for explanation.
-- Finish sentences and avoid truncation.
-- Keep replies concise unless the user asks for more detail.
-`
-  };
+// Put MARKER immediately before visible reply for storage; server will strip it before sending to front.
+function ensureMarkerBefore(text) {
+  // Always trim
+  const t = text == null ? '' : String(text).trim();
+  if (!ENABLE_MARKER) {
+    return t;
+  }
+  if (!t) return MARKER;
+  if (t.includes(MARKER)) return t;
+  return `${MARKER}\n\n${t}`;
 }
 
-// --- robust sanitizer that preserves code blocks but strips planning/meta lines ---
+// VERY ROBUST extraction: return strictly text AFTER last marker (no marker)
+// Avoid returning fragments like "Term" or "Terminé" or stray stars.
+function extractVisibleFromWrapped(wrappedText) {
+  if (!wrappedText || typeof wrappedText !== 'string') return '';
+  const raw = wrappedText;
+  let lastIdx = raw.lastIndexOf(MARKER);
+  let markerLen = MARKER.length;
+  let matchedText = null;
+
+  if (lastIdx === -1) {
+    const fuzzy = /(\*{0,}\s*Term(?:in?é|ine)?\s*\*{0,})/ig;
+    let m;
+    let lastMatch = null;
+    while ((m = fuzzy.exec(raw)) !== null) {
+      lastMatch = { index: m.index, text: m[0] };
+    }
+    if (lastMatch) {
+      lastIdx = lastMatch.index;
+      markerLen = lastMatch.text.length;
+      matchedText = lastMatch.text;
+    }
+  } else {
+    matchedText = MARKER;
+  }
+
+  if (lastIdx === -1) {
+    return raw.trim();
+  }
+
+  let after = raw.slice(lastIdx + markerLen);
+  after = after.replace(/^[\s\*—–\-\._"'`:]*/u, '');
+  after = after.replace(/^(?:Term(?:in?é|ine)?)/i, '');
+  return after.trim();
+}
+
+/* ---------------------------
+   Phrase bank (secure)
+   --------------------------- */
+let phraseBank = { phrases: {}, updatedAt: null };
+
+const RE_EMAIL = /[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/i;
+const RE_URL = /https?:\/\/|www\.[\S]+/i;
+const RE_PHONE = /(?:\+?\d{1,3}[-.\s]?)*\(?\d{2,4}\)?[-.\s]?\d{2,4}[-.\s]?\d{2,4}/;
+const RE_DIGIT_SEQ = /\d{3,}/;
+const MAX_PHRASE_LEN = 160;
+const MIN_PHRASE_LEN = 6;
+
+function isSafePhraseCandidate(txt) {
+  if (!txt || typeof txt !== 'string') return false;
+  const t = txt.trim();
+  if (t.length < MIN_PHRASE_LEN || t.length > MAX_PHRASE_LEN) return false;
+  if (RE_EMAIL.test(t)) return false;
+  if (RE_URL.test(t)) return false;
+  if (RE_PHONE.test(t)) return false;
+  if (RE_DIGIT_SEQ.test(t)) return false;
+  if (/\b(ssn|social security|passport|card number|password|mot de passe)\b/i.test(t)) return false;
+  if (/\S{40,}/.test(t)) return false;
+  return true;
+}
+
+function splitIntoCandidates(text) {
+  if (!text) return [];
+  const parts = text.split(/[.?!\n\r]+/).map(p => p.trim()).filter(Boolean);
+  const candidates = [];
+  for (const p of parts) {
+    if (p.length > MAX_PHRASE_LEN) {
+      const sub = p.split(/[,;:]+/).map(s => s.trim()).filter(Boolean);
+      for (const s of sub) if (s.length >= MIN_PHRASE_LEN && s.length <= MAX_PHRASE_LEN) candidates.push(s);
+    } else {
+      candidates.push(p);
+    }
+  }
+  return candidates;
+}
+
+async function loadPhraseBank() {
+  try {
+    const pb = await readJsonSafe(PHRASE_BANK_FILE, { phrases: {}, updatedAt: null });
+    phraseBank = pb;
+  } catch (e) {
+    phraseBank = { phrases: {}, updatedAt: null };
+  }
+}
+
+async function updatePhraseBankWithAssistantContent(rawContent) {
+  if (!rawContent || typeof rawContent !== 'string') return;
+  const candidates = splitIntoCandidates(rawContent);
+  let changed = false;
+  for (let c of candidates) {
+    c = c.replace(/\s{2,}/g, ' ').trim();
+    if (!isSafePhraseCandidate(c)) continue;
+    const normalized = c.replace(/\s+([,;:.!?])/g, '$1').trim();
+    phraseBank.phrases[normalized] = (phraseBank.phrases[normalized] || 0) + 1;
+    changed = true;
+  }
+  if (changed) {
+    phraseBank.updatedAt = new Date().toISOString();
+    try { await writeJsonSafe(PHRASE_BANK_FILE, phraseBank); } catch(e) {}
+  }
+}
+
+async function buildPhraseBankFromHistory() {
+  try {
+    const hist = await readJsonSafe(USER_HISTORY_FILE, { histories: {} });
+    const allHist = hist.histories || {};
+    for (const tfid of Object.keys(allHist)) {
+      const arr = allHist[tfid] || [];
+      for (const e of arr) {
+        if (e && e.role === 'assistant' && typeof e.content === 'string') {
+          const visible = extractVisibleFromWrapped(e.content);
+          await updatePhraseBankWithAssistantContent(visible);
+        }
+      }
+    }
+  } catch (e) {}
+}
+
+function findBestBankPhrase(userInput) {
+  const words = (userInput || '').toLowerCase().match(/\b[\p{L}0-9'-]+\b/gu) || [];
+  if (!words.length) return getMostFrequentPhrase();
+  let best = null;
+  let bestScore = 0;
+  for (const [phrase, count] of Object.entries(phraseBank.phrases || {})) {
+    const pWords = (phrase || '').toLowerCase().match(/\b[\p{L}0-9'-]+\b/gu) || [];
+    let overlap = 0;
+    const pSet = new Set(pWords);
+    for (const w of words) if (pSet.has(w)) overlap++;
+    const score = overlap * 2 + Math.log(1 + count);
+    if (score > bestScore && overlap > 0) {
+      bestScore = score;
+      best = phrase;
+    }
+  }
+  if (best) return best;
+  return getMostFrequentPhrase();
+}
+
+function getMostFrequentPhrase() {
+  const entries = Object.entries(phraseBank.phrases || {});
+  if (!entries.length) return null;
+  entries.sort((a,b) => b[1] - a[1]);
+  return entries[0][0];
+}
+
+/* ---------------------------
+   Sanitizer & extraction from provider
+   --------------------------- */
 function sanitizeAssistantText(raw) {
   if (!raw || typeof raw !== 'string') return null;
 
-  // Extract triple-backtick code blocks and replace with placeholders to keep them intact
+  // 1) Keep code blocks intact by placeholdering
   const codeBlocks = [];
-  const placeholders = [];
   let placeholderIndex = 0;
   const CODE_PLACEHOLDER = (i) => `__CODE_BLOCK_PLACEHOLDER_${i}__`;
-
   let temp = raw.replace(/```[\s\S]*?```/g, (m) => {
     const idx = placeholderIndex++;
     codeBlocks[idx] = m;
-    placeholders[idx] = CODE_PLACEHOLDER(idx);
-    return placeholders[idx];
+    return CODE_PLACEHOLDER(idx);
   });
 
-  // Split non-code portion into lines and filter meta/planning lines
-  const lines = temp.split(/\r?\n/);
-  const kept = [];
-  const metaPatterns = [
-    /^\s*\*{1,}/,                         // lines starting with *
+  // 2) Split lines and normalize
+  const lines = temp.split(/\r?\n/).map(l => l.replace(/\t/g,' ').trim());
+
+  // Patterns considered meta/internal/reasoning
+  const metaLinePatterns = [
     /^\s*Generating\b/i,
+    /^\s*Creation\b/i,
     /^\s*Creating\b/i,
-    /^\s*I\s+(need|should|want|will|must|have to|intend|plan)\b/i,
-    /^\s*I'll\b/i,
-    /^\s*I['’]m\b/i,
-    /^\s*I am\b/i,
-    /^\s*Let['’]s\b/i,
-    /^\s*We\b/i,
-    /^\s*Je\s+(vais|dois|veux|doit|devrais|prévois)\b/i,
-    /^\s*Générant\b/i,
-    /^\s*\*\*.*\*\*/,                     // **bold**
     /^\s*Plan[:\-]/i,
-    /^\s*\[?Generating/i,
+    /^\s*Step\s*\d+/i,
     /^\s*Steps?\b/i,
-    /^\s*Step\s*\d+/i
+    /^\s*\[?Generating/i,
+    /^\s*\(Draft[:\s]/i,
+    /^\s*Note[:\-]/i,
+    /^\s*Commande[:\-]/i,
+    /^\s*Command[:\-]/i,
+    /^\s*System[:\-]/i,
+    /^\s*\**\s*Considering\b/i,
+    /^\s*\**\s*Responding\b/i,
+    /^\s*\**\s*Responding in\b/i,
+    /^\s*\**\s*Considering user\b/i,
+    /^\s*\**\s*I\s+(think|believe|see|will|should)\b/i,
+    /^\s*\**\s*The user's?\s+/i,
+    /^\s*\**\s*(Because|Since|Therefore)\b/i,
+    /^\s*\**\s*Thoughts?\b/i,
+    /^\s*\**\s*Reasoning\b/i,
+    /^\s*\**\s*Analysis\b/i,
+    /^\s*\**\s*Conclusion\b/i,
+    /^\s*\**\s*Respond in\b/i,
+    /^\s*<\/?[^>]+>/i, // html tags
+    /^\s*\*{1,}.*\*{1,}\s*$/ // lines enclosed fully in asterisks (like **Considering user language**)
   ];
 
+  // Also short parenthetical meta like "(thinking...)" already partly covered
+  const shortThinking = /^[\(\[]\s*(thinking|processing|loading|one moment|please wait|en train|m'ap panse|mwen panse|je réfléchis|estoy pensando|espera un momento)[\)\]]\.?$/i;
+
+  // Keep only lines that are not meta, but we'll also remove leading meta blocks
+  const rawKept = [];
   for (let ln of lines) {
-    const t = ln.trim();
-    if (!t) continue;
+    if (!ln) continue;
+    if (shortThinking.test(ln)) continue;
+
+    // if line matches any meta pattern -> mark as meta
     let isMeta = false;
-    for (const p of metaPatterns) {
-      if (p.test(t)) { isMeta = true; break; }
+    for (const p of metaLinePatterns) {
+      if (p.test(ln)) { isMeta = true; break; }
     }
-    if (isMeta) continue;
-    // remove some very common provider fallback literal phrases
-    if (/^sorry[,]?\s+i\s+couldn'?t\s+get\s+a\s+complete\s+answer/i.test(t)) continue;
-    if (/^\*\*generating/i.test(t)) continue;
-    kept.push(ln);
+    if (isMeta) {
+      rawKept.push({ meta: true, text: ln });
+    } else {
+      // remove superficial prefixes like "Assistant:" or "System:"
+      const cleaned = ln.replace(/^(Assistant|System|AI|Bot|Response)[:\-\s]+/i, '').trim();
+      rawKept.push({ meta: false, text: cleaned });
+    }
   }
 
-  // Reconstruct text and restore code blocks
-  let out = kept.join('\n').trim();
-  for (let i = 0; i < placeholders.length; i++) {
-    if (!placeholders[i]) continue;
-    out = out.replace(placeholders[i], codeBlocks[i] || placeholders[i]);
+  if (!rawKept.length) return null;
+
+  // Remove leading meta-only block: many models print reasoning first then final reply.
+  let firstNonMetaIndex = 0;
+  while (firstNonMetaIndex < rawKept.length && rawKept[firstNonMetaIndex].meta) firstNonMetaIndex++;
+  let kept = rawKept.slice(firstNonMetaIndex).map(o => o.text);
+
+  // If everything was meta, fallback to removing meta flags and keep last few lines
+  if (!kept.length) {
+    // choose last non-empty lines (but strip meta markers)
+    const lastTexts = rawKept.slice(-4).map(o => o.text);
+    kept = lastTexts.filter(Boolean);
   }
 
-  // Final trim; if empty, return null
-  out = out.trim();
+  // Join, normalize whitespace
+  let out = kept.join('\n').replace(/\s{2,}/g, ' ').trim();
+
+  // Restore code blocks placeholders
+  for (let i = 0; i < codeBlocks.length; i++) {
+    const ph = CODE_PLACEHOLDER(i);
+    out = out.replace(ph, codeBlocks[i] || ph);
+  }
+
+  // Final safety: don't return empty string
   return out === '' ? null : out;
 }
 
-// --- extract assistant text from provider response (robust) ---
 function extractAssistantText(payloadJson) {
   if (!payloadJson) return null;
   const safe = (s) => (typeof s === 'string' && s.trim() ? s.trim() : null);
 
-  // Try standard choices[0].message.content
   if (Array.isArray(payloadJson.choices) && payloadJson.choices.length) {
     const c = payloadJson.choices[0];
     const mc = safe(c?.message?.content);
@@ -186,7 +375,6 @@ function extractAssistantText(payloadJson) {
       const s = sanitizeAssistantText(mc);
       if (s) return s;
     }
-    // fallback to text or delta
     const ct = safe(c.text);
     if (ct) {
       const s = sanitizeAssistantText(ct);
@@ -197,7 +385,6 @@ function extractAssistantText(payloadJson) {
       const s = sanitizeAssistantText(d);
       if (s) return s;
     }
-    // reasoning_details: only use non-encrypted summaries
     if (Array.isArray(c?.message?.reasoning_details)) {
       for (const it of c.message.reasoning_details) {
         if (!it) continue;
@@ -210,7 +397,6 @@ function extractAssistantText(payloadJson) {
     }
   }
 
-  // Try common keys
   const keys = ['response','output','result','text'];
   for (const k of keys) {
     if (typeof payloadJson[k] === 'string' && payloadJson[k].trim()) {
@@ -219,7 +405,6 @@ function extractAssistantText(payloadJson) {
     }
   }
 
-  // Last attempt: search raw JSON for a "content" like field (best-effort)
   try {
     const raw = JSON.stringify(payloadJson || {});
     const m = raw.match(/"content"\\s*:\\s*"([^"]{10,2000})"/i);
@@ -233,7 +418,9 @@ function extractAssistantText(payloadJson) {
   return null;
 }
 
-// --- fetch wrapper with timeout ---
+/* ---------------------------
+   Fetch wrapper
+   --------------------------- */
 async function fetchWithTimeout(url, options = {}, timeoutMs = DEFAULT_TIMEOUT_MS) {
   const controller = new AbortController();
   const id = setTimeout(() => controller.abort(), timeoutMs);
@@ -250,7 +437,9 @@ async function fetchWithTimeout(url, options = {}, timeoutMs = DEFAULT_TIMEOUT_M
   }
 }
 
-// --- append to per-user private history ---
+/* ---------------------------
+   History append (also updates phrase bank)
+   --------------------------- */
 async function appendUserHistory(tfid, entry) {
   const hist = await readJsonSafe(USER_HISTORY_FILE, { histories: {} });
   hist.histories = hist.histories || {};
@@ -261,9 +450,27 @@ async function appendUserHistory(tfid, entry) {
     hist.histories[tfid] = hist.histories[tfid].slice(-CAP);
   }
   await writeJsonSafe(USER_HISTORY_FILE, hist);
+
+  try {
+    if (entry && entry.role === 'assistant' && typeof entry.content === 'string') {
+      const visible = extractVisibleFromWrapped(entry.content);
+      await updatePhraseBankWithAssistantContent(visible);
+    }
+  } catch (e) {}
 }
 
-// --- endpoints ---
+/* ---------------------------
+   Init files & phrasebank
+   --------------------------- */
+await readJsonSafe(USERS_FILE, { users: [] });
+await readJsonSafe(SESSIONS_FILE, { sessions: {} });
+await readJsonSafe(USER_HISTORY_FILE, { histories: {} });
+await loadPhraseBank();
+await buildPhraseBankFromHistory();
+
+/* ---------------------------
+   Endpoints: user, session, history
+   --------------------------- */
 app.post('/user', async (req, res) => {
   try {
     const { name, tfid } = req.body || {};
@@ -333,7 +540,9 @@ app.get('/history/:tfid/:n?', async (req, res) => {
   }
 });
 
-// --- main /message endpoint ---
+/* ---------------------------
+   Main /message endpoint
+   --------------------------- */
 app.post('/message', async (req, res) => {
   try {
     const { tfid, sessionId } = req.body || {};
@@ -356,47 +565,56 @@ app.post('/message', async (req, res) => {
     if (!session) return res.status(404).json({ error: 'session_not_found' });
     if (session.tfid !== tfid) return res.status(403).json({ error: 'session_belongs_to_other_user' });
 
-    // --- quick local handling for very short / chatty / slang messages (avoid calling provider) ---
-    const slangPattern = /\b(bro|bruh|man|mate|gee|yo|neg[o]?)\b/i;
-    const words = clean.trim().split(/\s+/);
-    if (clean.length <= 60 && words.length <= 6 && slangPattern.test(clean)) {
-      const quickReply = "Heeey! M'ap la — di m kisa ou bezwen?";
-      session.messages = session.messages || [];
-      session.messages.push({ role: 'user', content: clean, ts: Date.now() });
-      session.messages.push({ role: 'assistant', content: quickReply, ts: Date.now() });
-      await writeJsonSafe(SESSIONS_FILE, sessionsData);
-      await appendUserHistory(tfid, { role: 'user', content: clean, sessionId, ts: Date.now() });
-      await appendUserHistory(tfid, { role: 'assistant', content: quickReply, sessionId, ts: Date.now() });
-      return res.json({ assistant: quickReply });
-    }
-
-    // short artifact filter but allow greetings
-    const greetingWhitelist = new Set(['hi','hey','hello','salut','bonjour','hola','ola','yo','coucou','alo','heyo']);
-    const shortArtifact = /^[A-Za-zÀ-ÖØ-öø-ÿ]{1,2}$/;
-    const lc = clean.toLowerCase();
-    if (shortArtifact.test(clean) && !greetingWhitelist.has(lc)) {
-      const local = `I did not understand "${clean}". Could you please clarify?`;
-      session.messages = session.messages || [];
-      session.messages.push({ role:'user', content: clean, ts: Date.now() });
-      await appendUserHistory(tfid, { role: 'user', content: clean, sessionId, ts: Date.now() });
-      session.messages.push({ role:'assistant', content: local, ts: Date.now() });
-      await writeJsonSafe(SESSIONS_FILE, sessionsData);
-      await appendUserHistory(tfid, { role: 'assistant', content: local, sessionId, ts: Date.now() });
-      return res.json({ assistant: local });
-    }
-
-    // append user message to session + user_history
+    // Append user message to session + history (we still record it)
     session.messages = session.messages || [];
     session.messages.push({ role: 'user', content: clean, ts: Date.now() });
     await appendUserHistory(tfid, { role: 'user', content: clean, sessionId, ts: Date.now() });
 
-    // build payload: system + last HISTORY_TAIL messages from this session
+    // build payload: system + compact context + ensure last user message is final (priority)
     const systemMsg = makeSystemPrompt(tfid, sessionId, user.name || DEFAULT_USER_NAME);
     const history = (session.messages || []).map(m => ({ role: m.role, content: m.content || '' }));
     const tail = history.slice(-HISTORY_TAIL);
-    const payloadMessages = [systemMsg, ...tail];
 
-    // provider call loop with retries & recovery
+    // Build a plain-text context summary (background only). Limit length.
+    let contextLines = [];
+    for (const m of tail) {
+      contextLines.push(`${m.role.toUpperCase()}: ${String(m.content || '').replace(/\s+/g,' ').trim()}`);
+    }
+    let contextText = contextLines.join('\n').trim();
+    if (contextText.length > 4000) contextText = contextText.slice(-4000);
+
+    const contextSystemMsg = {
+      role: 'system',
+      content: `CONTEXT (background — use only to clarify). Treat the most recent user message as the highest priority:\n${contextText}`
+    };
+
+    // Add an explicit system instruction to prioritize final user message; instruct model not to output the literal marker.
+    const prioritySystemMsg = {
+      role: 'system',
+      content: [
+        'IMPORTANT: Prioritize the final USER message below when producing your answer.',
+        'Do NOT output internal chain-of-thought or planning as visible text.',
+        `Do NOT include the literal marker string ${MARKER} in your response; the server handles any internal markings.`,
+        'When you finish internal reflection, put the marker EXACTLY on its own line before the visible reply: ' + MARKER
+      ].join(' ')
+    };
+
+    // Final payload: system instructions, background context, then the user's current message LAST
+    const payloadMessages = [systemMsg, contextSystemMsg, prioritySystemMsg, { role: 'user', content: clean }];
+
+    // ---------- LECTURE / RÉFLEXION ----------
+    // 1) lire prompt pendant THINK_PROMPT_MS (pause to simulate "reading the prompt")
+    if (THINK_PROMPT_MS > 0) {
+      await sleep(THINK_PROMPT_MS);
+    }
+
+    // 2) lire messages pendant THINK_MESSAGES_MS (pause to simulate "reading messages")
+    if (THINK_MESSAGES_MS > 0) {
+      await sleep(THINK_MESSAGES_MS);
+    }
+    // ---------- fin réflexion ----------
+
+    // provider call loop
     let attempt = 0;
     let currentMax = DEFAULT_MAX_TOKENS;
     let lastResp = null;
@@ -418,15 +636,12 @@ app.post('/message', async (req, res) => {
         body: JSON.stringify(payload)
       }, DEFAULT_TIMEOUT_MS);
 
-      // network error
       if (!lastResp.ok && lastResp.fetchError) {
-        const fe = lastResp.fetchError;
-        const details = { message: "Network error contacting provider", error: String(fe) };
-        return res.status(502).json({ error: 'network_error', details });
+        console.warn('Network error contacting provider:', String(lastResp.fetchError));
+        continue; // retry
       }
 
       if (!lastResp.ok) {
-        // 402 handling
         if (lastResp.status === 402) {
           let affordable = null;
           const j = lastResp.json;
@@ -438,15 +653,10 @@ app.post('/message', async (req, res) => {
             }
           }
           if (!affordable || Number.isNaN(affordable)) affordable = Math.max(MIN_TOKENS, Math.floor(currentMax * 0.6));
-
-          // if affordable is very small -> low-cost recovery
           if (affordable <= RECOVERY_MAX_TOKENS_CAP) {
             const recMax = Math.max(MIN_TOKENS, Math.min(affordable, RECOVERY_MAX_TOKENS_CAP));
-            const recoveryMsg = {
-              role: 'user',
-              content: `Brief summary: give a direct short answer (1 sentence) to the previous request: "${clean}".`
-            };
-            const shortPayload = { model: OPENROUTER_MODEL, messages: [systemMsg, ...tail.slice(-1), recoveryMsg], max_tokens: recMax, max_output_tokens: recMax, temperature: 0.0 };
+            const recoveryMsg = { role: 'user', content: `Brief summary: give a direct short answer (1 sentence) to the previous request: "${clean}".` };
+            const shortPayload = { model: OPENROUTER_MODEL, messages: [systemMsg, contextSystemMsg, recoveryMsg], max_tokens: recMax, max_output_tokens: recMax, temperature: 0.0 };
             const recoveryResp = await fetchWithTimeout(OPENROUTER_ENDPOINT, {
               method: 'POST',
               headers: { 'Content-Type':'application/json', 'Authorization': 'Bearer ' + OPENROUTER_API_KEY },
@@ -455,39 +665,25 @@ app.post('/message', async (req, res) => {
             if (recoveryResp.ok) {
               const recovered = extractAssistantText(recoveryResp.json);
               if (recovered) {
-                session.messages.push({ role: 'assistant', content: recovered, ts: Date.now() });
+                // Wrap for storage
+                const wrapped = ensureMarkerBefore(recovered);
+                const visible = extractVisibleFromWrapped(wrapped);
+                session.messages.push({ role: 'assistant', content: wrapped, ts: Date.now() });
                 await writeJsonSafe(SESSIONS_FILE, sessionsData);
-                await appendUserHistory(tfid, { role: 'assistant', content: recovered, sessionId, ts: Date.now() });
-                return res.json({ assistant: recovered });
+                await appendUserHistory(tfid, { role: 'assistant', content: wrapped, sessionId, ts: Date.now() });
+                return res.json({ assistant: visible });
               }
             }
-            const guidance = `Low credits (${affordable} tokens). Veux-tu un très court résumé ?`;
-            session.messages.push({ role: 'assistant', content: guidance, ts: Date.now() });
-            await writeJsonSafe(SESSIONS_FILE, sessionsData);
-            await appendUserHistory(tfid, { role: 'assistant', content: guidance, sessionId, ts: Date.now() });
-            return res.json({ assistant: guidance });
           }
-
-          // otherwise reduce currentMax then retry
-          const prev = currentMax;
-          let next = affordable < currentMax ? Math.max(MIN_TOKENS, Math.min(affordable, currentMax - 1)) : Math.max(MIN_TOKENS, Math.floor(currentMax * 0.75));
-          if (next >= prev) break;
-          currentMax = next;
-          continue;
         }
-
-        // other provider error -> break
-        break;
+        continue;
       }
 
-      // lastResp.ok === true: try to extract
       extracted = extractAssistantText(lastResp.json);
       const maybeChoice = lastResp.json?.choices?.[0];
       const finishReason = maybeChoice?.finish_reason || maybeChoice?.native_finish_reason || null;
-
       if (extracted) break;
 
-      // if truncated, try increasing budget but bounded
       if (finishReason === 'length' || finishReason === 'max_output_tokens') {
         if (currentMax < MAX_ALLOWED_TOKENS) {
           const prev = currentMax;
@@ -495,97 +691,42 @@ app.post('/message', async (req, res) => {
           if (currentMax !== prev) continue;
         }
       }
-
-      // else fallback to continuation/regeneration outside loop
-      break;
-    } // end while
+    } // end loop
 
     let assistantText = extracted || null;
-
-    // final attempt to extract if provider ok
     if (!assistantText && lastResp && lastResp.ok) assistantText = extractAssistantText(lastResp.json);
 
-    const maybeChoiceFinal = lastResp?.json?.choices?.[0];
-
-    // continuation attempt if truncated and no assistantText
-    if (!assistantText && maybeChoiceFinal && (maybeChoiceFinal.finish_reason === 'length' || maybeChoiceFinal.native_finish_reason === 'max_output_tokens')) {
-      const continueUser = { role: 'user', content: `Continue and finish the previous answer concisely (1 to 3 sentences). Always finish sentences.` };
-      const contMax = Math.max(MIN_TOKENS, Math.min(Math.floor(currentMax / 2), RECOVERY_MAX_TOKENS_CAP));
-      const contPayload = { model: OPENROUTER_MODEL, messages: [...payloadMessages, continueUser], max_tokens: contMax, max_output_tokens: contMax, temperature: 0.0 };
-      const contResp = await fetchWithTimeout(OPENROUTER_ENDPOINT, {
-        method: 'POST',
-        headers: { 'Content-Type':'application/json', 'Authorization': 'Bearer ' + OPENROUTER_API_KEY },
-        body: JSON.stringify(contPayload)
-      }, DEFAULT_TIMEOUT_MS);
-      if (contResp.ok) {
-        const contText = extractAssistantText(contResp.json);
-        if (contText) {
-          session.messages.push({ role: 'assistant', content: contText, ts: Date.now() });
-          await writeJsonSafe(SESSIONS_FILE, sessionsData);
-          await appendUserHistory(tfid, { role: 'assistant', content: contText, sessionId, ts: Date.now() });
-          return res.json({ assistant: contText });
-        }
-      }
-    }
-
-    // final regeneration attempt (short) - FORCE one final small reply before giving up
     if (!assistantText) {
-      const regenUser = { role: 'user', content: `Give a brief clear answer (one sentence) to: "${clean}". No internal analysis, plain text.` };
-      const regenPayload = { model: OPENROUTER_MODEL, messages: [systemMsg, ...tail.slice(-1), regenUser], max_tokens: RECOVERY_MAX_TOKENS_CAP, max_output_tokens: RECOVERY_MAX_TOKENS_CAP, temperature: 0.0 };
-      const regenResp = await fetchWithTimeout(OPENROUTER_ENDPOINT, {
-        method: 'POST',
-        headers: { 'Content-Type':'application/json', 'Authorization': 'Bearer ' + OPENROUTER_API_KEY },
-        body: JSON.stringify(regenPayload)
-      }, DEFAULT_TIMEOUT_MS);
-      if (regenResp.ok) {
-        const regenText = extractAssistantText(regenResp.json);
-        if (regenText) {
-          session.messages.push({ role: 'assistant', content: regenText, ts: Date.now() });
-          await writeJsonSafe(SESSIONS_FILE, sessionsData);
-          await appendUserHistory(tfid, { role: 'assistant', content: regenText, sessionId, ts: Date.now() });
-          return res.json({ assistant: regenText });
-        }
-        // best-effort: look into raw JSON for content field and sanitize
-        try {
-          const raw = JSON.stringify(regenResp.json || {});
-          const m = raw.match(/"content"\\s*:\\s*"([^"]{10,2000})"/);
-          if (m) {
-            const candidate = m[1].replace(/\\n/g,' ').replace(/\\"/g,'"');
-            const candClean = sanitizeAssistantText(candidate);
-            if (candClean) {
-              session.messages.push({ role: 'assistant', content: candClean, ts: Date.now() });
-              await writeJsonSafe(SESSIONS_FILE, sessionsData);
-              await appendUserHistory(tfid, { role: 'assistant', content: candClean, sessionId, ts: Date.now() });
-              return res.json({ assistant: candClean });
-            }
-          }
-        } catch(e) { /* ignore */ }
-      }
-    }
-
-    // final fallback concise (localized)
-    if (!assistantText) {
-      const fallback = "Désolé, je n'ai pas pu obtenir une réponse complète pour le moment. Veux-tu que j'essaie encore ?";
-      session.messages.push({ role: 'assistant', content: fallback, ts: Date.now() });
+      const bankReply = localFallbackUsingBank(clean);
+      const wrapped = ensureMarkerBefore(bankReply);
+      const visible = extractVisibleFromWrapped(wrapped);
+      session.messages.push({ role: 'assistant', content: wrapped, ts: Date.now() });
       await writeJsonSafe(SESSIONS_FILE, sessionsData);
-      await appendUserHistory(tfid, { role: 'assistant', content: fallback, sessionId, ts: Date.now() });
-      return res.json({ assistant: fallback });
+      await appendUserHistory(tfid, { role: 'assistant', content: wrapped, sessionId, ts: Date.now() });
+      return res.json({ assistant: visible });
     }
 
-    // success: save assistant message in session and user history
-    session.messages.push({ role: 'assistant', content: assistantText, ts: Date.now() });
+    // Wrap for storage (this will add marker before visible content when ENABLE_MARKER=true)
+    const wrapped = ensureMarkerBefore(assistantText);
+    const visible = extractVisibleFromWrapped(wrapped);
+    session.messages.push({ role: 'assistant', content: wrapped, ts: Date.now() });
     await writeJsonSafe(SESSIONS_FILE, sessionsData);
-    await appendUserHistory(tfid, { role: 'assistant', content: assistantText, sessionId, ts: Date.now() });
+    await appendUserHistory(tfid, { role: 'assistant', content: wrapped, sessionId, ts: Date.now() });
 
-    return res.json({ assistant: assistantText });
+    return res.json({ assistant: visible });
 
   } catch (err) {
     console.error('/message error', err);
-    return res.status(500).json({ error: 'server_error', details: err?.message || String(err) });
+    const fallback = localFallbackUsingBank(req.body?.text || '');
+    const wrapped = ensureMarkerBefore(fallback);
+    const visible = extractVisibleFromWrapped(wrapped);
+    return res.status(500).json({ assistant: visible, error: 'server_error', details: String(err?.message || err) });
   }
 });
 
-// health
+/* ---------------------------
+   Health
+   --------------------------- */
 app.get('/health', (req,res) => res.json({ ok: true }));
 
 app.listen(PORT, () => {
@@ -593,3 +734,52 @@ app.listen(PORT, () => {
   console.log(`Model: ${OPENROUTER_MODEL}  Endpoint: ${OPENROUTER_ENDPOINT}`);
   console.log(`Defaults: HISTORY_TAIL=${HISTORY_TAIL}, DEFAULT_MAX_TOKENS=${DEFAULT_MAX_TOKENS}`);
 });
+
+/* ---------------------------
+   System prompt maker
+   --------------------------- */
+function makeSystemPrompt(tfid, sessionId, userName = null) {
+  const display = userName || DEFAULT_USER_NAME || tfid;
+  return {
+    role: 'system',
+    content: [
+      `You are Adam_D'H7, a helpful assistant created by D'H7 | Tergene for ${display}. Session: ${sessionId}.`,
+      'GUIDELINES:',
+      '- Reply naturally in the user\'s language (French / Haitian Creole as appropriate).',
+      '- PRIORITIZE the most recent USER message: treat earlier history only as context/background.',
+      '- DO NOT output internal chain-of-thought, private planning, or reasoning details as visible text.',
+      `- WHEN YOU HAVE A FINAL VISIBLE REPLY: place the marker EXACTLY on its own line IMMEDIATELY BEFORE the visible reply: ${MARKER}`,
+      `  Example (must be the same string, on its own line):`,
+      `  ${MARKER}`,
+      `  Bonjour ! Comment puis-je vous aider ?`,
+      '- Do NOT include meta lines like "Considering user language" or "Responding in French" in visible output.',
+      '- If you must think, keep it internal and do not print it. Then place the marker and the visible reply.',
+      '- When user requests code, return code only (in a code block) unless the user asks for explanation.'
+    ].join(' ')
+  };
+}
+
+/* ---------------------------
+   Local fallback logic
+   --------------------------- */
+function localFallback(userInput) {
+  if (!userInput || typeof userInput !== 'string') return "Salut ! Comment puis-je t'aider ?";
+  const lc = userInput.toLowerCase();
+  if (/\b(salut|bonjour|hey|coucou)\b/.test(lc)) {
+    return "Salut ! Comment puis-je t'aider aujourd'hui ?";
+  }
+  if (/\b(nom|comment t'?appelle|t'?appelle)\b/.test(lc)) {
+    return "Je m'appelle Adam_D'H7. En quoi puis-je t'aider ?";
+  }
+  if (/\b(cod|coder|programm|javascript|node|react|python)\b/.test(lc)) {
+    return "Oui, je sais coder — dis-moi le langage ou la tâche (ex: Node.js, React, Python) et je t'aiderai.";
+  }
+  const short = userInput.length > 200 ? userInput.slice(0, 200) + '…' : userInput;
+  return `Je peux t'aider avec: "${short}". Peux-tu préciser ce que tu veux exactement ?`;
+}
+
+function localFallbackUsingBank(userInput) {
+  const best = findBestBankPhrase(userInput);
+  if (best) return best;
+  return localFallback(userInput);
+  }
