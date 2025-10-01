@@ -9,13 +9,13 @@ import crypto from 'crypto';
 
 dotenv.config();
 
-// ensure fetch exists (Node 18+ has global fetch). If not, try node-fetch dynamically.
+// Ensure global fetch exists (Node 18+). If not, try to import node-fetch v3 dynamically.
 if (typeof globalThis.fetch !== 'function') {
   try {
     const nf = await import('node-fetch');
     globalThis.fetch = nf.default;
   } catch (e) {
-    console.error('Global fetch not available and node-fetch could not be imported. Use Node 18+ or install node-fetch.');
+    console.error('Global fetch not available and node-fetch could not be imported. Please run on Node 18+ or install node-fetch v3.');
     throw e;
   }
 }
@@ -24,20 +24,21 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 const app = express();
-const PORT = process.env.PORT || 3000;
+const PORT = Number(process.env.PORT || 3000);
 const OPENROUTER_API_KEY = (process.env.OPENROUTER_API_KEY || '').trim();
-const MASTER_KEY_HEX = (process.env.MASTER_KEY || '').trim(); // optional: 64 hex chars
-const MODEL = process.env.MODEL || 'openai/gpt-5';
+const MASTER_KEY_HEX = (process.env.MASTER_KEY || '').trim(); // optional but required to save user API keys encrypted
+const MODEL = (process.env.MODEL || 'openai/gpt-5').trim();
 const SYSTEM_PROMPT = (process.env.SYSTEM_PROMPT && process.env.SYSTEM_PROMPT.trim()) ||
   "You are Adam_D'H7. Created by D'H7 | Tergene. Be concise. Do NOT reveal internal chain-of-thought.";
 
 const USERS_FILE = path.join(__dirname, 'user.json');
 const SESSIONS_FILE = path.join(__dirname, 'sessions.json');
 
-// Configurable defaults
-const DEFAULT_MAX_TOKENS = Number(process.env.DEFAULT_MAX_TOKENS) || 170;
-const DEFAULT_TEMPERATURE = Number(process.env.DEFAULT_TEMPERATURE) || 0.2;
-const HISTORY_MESSAGE_LIMIT = Number(process.env.HISTORY_MESSAGE_LIMIT) || 16;
+// Tunables
+const DEFAULT_MAX_TOKENS = Number(process.env.DEFAULT_MAX_TOKENS || 170);
+const DEFAULT_TEMPERATURE = Number(process.env.DEFAULT_TEMPERATURE || 0.2);
+const HISTORY_MESSAGE_LIMIT = Number(process.env.HISTORY_MESSAGE_LIMIT || 16);
+const MAX_PASSES = Number(process.env.MAX_PASSES || 2);
 const DEV_DEBUG = process.env.DEV_DEBUG === '1';
 
 if (!OPENROUTER_API_KEY) {
@@ -50,11 +51,11 @@ app.use(express.json({ limit: '2mb' }));
 app.use(express.urlencoded({ extended: false }));
 app.use(express.static(path.join(__dirname, 'public')));
 
-// --- Helpers: atomic read/write JSON (create default if not exists) ---
+// ------------------ File helpers ------------------
 async function readJsonSafe(filePath, defaultValue) {
   try {
     const raw = await fs.readFile(filePath, 'utf8');
-    return JSON.parse(raw);
+    return JSON.parse(raw || '{}');
   } catch (err) {
     if (err.code === 'ENOENT') {
       await fs.writeFile(filePath, JSON.stringify(defaultValue, null, 2), 'utf8');
@@ -71,7 +72,7 @@ async function writeJsonSafe(filePath, obj) {
   await fs.rename(tmp, filePath);
 }
 
-// --- Encryption helpers (AES-256-GCM) ---
+// ------------------ Encryption helpers ------------------
 function hasMasterKey() {
   return !!MASTER_KEY_HEX && MASTER_KEY_HEX.length === 64;
 }
@@ -100,14 +101,13 @@ function decryptText(payload) {
   return plain.toString('utf8');
 }
 
-// --- TFID generator (7 chars A-Z and 1-9) ---
+// ------------------ TFID generator ------------------
 const TF_CHARS = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ123456789';
 function generateTFID() {
   const bytes = crypto.randomBytes(7);
   let id = '';
   for (let i = 0; i < 7; i++) {
-    const n = bytes[i] % TF_CHARS.length;
-    id += TF_CHARS[n];
+    id += TF_CHARS[bytes[i] % TF_CHARS.length];
   }
   return id;
 }
@@ -121,11 +121,11 @@ async function ensureUniqueTFID() {
   return 'TF' + crypto.randomUUID().slice(0, 5).toUpperCase();
 }
 
-// --- Init files ---
+// ------------------ Init files ------------------
 await readJsonSafe(USERS_FILE, { users: [] });
 await readJsonSafe(SESSIONS_FILE, { sessions: {} });
 
-// --- Utility: system prompt builder per session
+// ------------------ System prompt builder ------------------
 function makeSystemPrompt(tfid, sessionId) {
   return {
     role: 'system',
@@ -140,7 +140,7 @@ Important instructions:
   };
 }
 
-// --- Robust extractor for provider responses ---
+// ------------------ Provider response helpers ------------------
 function collectStrings(value) {
   if (value == null) return '';
   if (typeof value === 'string') return value;
@@ -153,10 +153,11 @@ function collectStrings(value) {
   }
   return '';
 }
-function extractAssistantText(j) {
-  if (!j) return null;
-  if (Array.isArray(j.choices) && j.choices.length) {
-    const c = j.choices[0];
+
+function extractAssistantText(parsed) {
+  if (!parsed) return null;
+  if (Array.isArray(parsed.choices) && parsed.choices.length) {
+    const c = parsed.choices[0];
     if (c.message && typeof c.message.content === 'string' && c.message.content.trim()) return c.message.content.trim();
     if (c.message && c.message.content) {
       const s = collectStrings(c.message.content).trim();
@@ -169,27 +170,26 @@ function extractAssistantText(j) {
     }
     try { return JSON.stringify(c).slice(0, 2000); } catch (e) { return null; }
   }
-  if (typeof j.text === 'string' && j.text.trim()) return j.text.trim();
-  const fallback = collectStrings(j).trim();
+  if (typeof parsed.text === 'string' && parsed.text.trim()) return parsed.text.trim();
+  const fallback = collectStrings(parsed).trim();
   if (fallback) return fallback;
   return null;
 }
 
-// --- Sanitize parsed provider objects before exposing them ---
+// Remove sensitive/internal fields from provider JSON before logging or exposing
 function deepSanitize(obj) {
   if (obj == null || typeof obj !== 'object') return obj;
   if (Array.isArray(obj)) return obj.map(v => deepSanitize(v));
   const copy = {};
   for (const k of Object.keys(obj)) {
     const lower = String(k).toLowerCase();
-    // Keys we do NOT want to expose to UI
-    if (['logprobs', 'reasoning', 'reasoning_details', 'internal', 'debug', 'trace', 'metadata', 'safety', 'plugins'].includes(lower)) {
+    if (['logprobs', 'reasoning', 'reasoning_details', 'internal', 'debug', 'trace', 'safety', 'metadata', 'plugins'].includes(lower)) {
       continue;
     }
     try {
       copy[k] = deepSanitize(obj[k]);
     } catch {
-      // skip problematic entries
+      // skip problematic entry
     }
   }
   return copy;
@@ -205,7 +205,7 @@ function safeSnippetFromParsed(parsed, maxChars = 800) {
   }
 }
 
-// --- Parse allowed tokens from OpenRouter 402 error message ---
+// ------------------ Parse helpful info from OpenRouter error messages ------------------
 function parseAllowedTokensFromErrorText(text) {
   if (!text) return null;
   let m = text.match(/can only afford\s*(\d+)/i);
@@ -217,7 +217,7 @@ function parseAllowedTokensFromErrorText(text) {
   return null;
 }
 
-// --- Post to OpenRouter with fallback adjustments on 402 (accepts apiKey param) ---
+// ------------------ Call OpenRouter with fallback for 402 ------------------
 async function postToOpenRouterWithFallback(body, apiKey = OPENROUTER_API_KEY, maxRetries = 2) {
   const url = 'https://openrouter.ai/api/v1/chat/completions';
   let attempt = 0;
@@ -263,7 +263,6 @@ async function postToOpenRouterWithFallback(body, apiKey = OPENROUTER_API_KEY, m
       }
 
       return { ok: false, status: resp.status, parsed, rawText: textResp };
-
     } catch (err) {
       console.error('[openrouter] network/exception on attempt', attempt, err);
       if (attempt > maxRetries) return { ok: false, error: String(err) };
@@ -274,13 +273,13 @@ async function postToOpenRouterWithFallback(body, apiKey = OPENROUTER_API_KEY, m
   return { ok: false, error: 'exhausted_retries' };
 }
 
-// --- Deliberate & refine pipeline (uses postToOpenRouterWithFallback with user's or global key) ---
+// ------------------ Deliberate & refine pipeline ------------------
 async function deliberateAndRefine(baseMessagesForApi, apiKeyToUse, userText) {
   try {
     const historyLen = (baseMessagesForApi.map(m => m.content || '').join(' ') || '').length;
     const contentLen = (userText || '').length + historyLen;
     let passes = 1 + Math.floor(contentLen / 800);
-    passes = Math.max(1, Math.min(passes, 2)); // keep passes 1..2 for cost control
+    passes = Math.max(1, Math.min(passes, MAX_PASSES));
 
     const draftMessages = [
       ...baseMessagesForApi,
@@ -295,16 +294,14 @@ async function deliberateAndRefine(baseMessagesForApi, apiKeyToUse, userText) {
       temperature: DEFAULT_TEMPERATURE
     }, apiKeyToUse, 1);
 
-    if (!draftResult.ok) {
-      // fallback early
-      return null;
-    }
+    if (!draftResult.ok) return null;
+
     let draft = extractAssistantText(draftResult.parsed) || '';
 
     for (let pass = 2; pass <= passes; pass++) {
       const refineMessages = [
         ...baseMessagesForApi,
-        { role: 'system', content: `You are Adam_D'H7. Deliberation pass ${pass}/${passes}: Critique and improve the previous draft briefly and produce an improved final answer. DO NOT output internal critique or chain-of-thought.` },
+        { role: 'system', content: `You are Adam_D'H7. Deliberation pass ${pass}/${passes}: Critique and improve previous draft and output only improved answer.` },
         { role: 'assistant', content: draft },
         { role: 'user', content: userText || 'Refine the draft and produce the final improved answer.' }
       ];
@@ -328,10 +325,9 @@ async function deliberateAndRefine(baseMessagesForApi, apiKeyToUse, userText) {
   }
 }
 
-// ----------------- API Endpoints -----------------
+// ------------------ API Endpoints ------------------
 
-// Create new user (or return existing if tfid provided).
-// Body: { name? }  OR { tfid }
+// Create new user or return by tfid
 app.post('/user', async (req, res) => {
   try {
     const { name, tfid } = req.body || {};
@@ -369,13 +365,11 @@ app.get('/users', async (req, res) => {
   }
 });
 
-// Set (save) a user's API key (encrypted) — requires MASTER_KEY to be set on the server.
-// Body: { tfid, apikey }
+// Save user's API key (encrypted)
 app.post('/user/apikey', async (req, res) => {
   try {
     const { tfid, apikey } = req.body || {};
     if (!tfid || !apikey) return res.status(400).json({ error: 'tfid_and_apikey_required' });
-
     if (!hasMasterKey()) return res.status(400).json({ error: 'server_missing_master_key' });
 
     const data = await readJsonSafe(USERS_FILE, { users: [] });
@@ -396,16 +390,13 @@ app.post('/user/apikey', async (req, res) => {
   }
 });
 
-// Delete user's saved API key
 app.delete('/user/apikey', async (req, res) => {
   try {
     const { tfid } = req.body || req.query || {};
     if (!tfid) return res.status(400).json({ error: 'tfid_required' });
-
     const data = await readJsonSafe(USERS_FILE, { users: [] });
     const found = data.users.find(u => u.tfid === tfid);
     if (!found) return res.status(404).json({ error: 'user_not_found' });
-
     found.encryptedApiKey = null;
     await writeJsonSafe(USERS_FILE, data);
     return res.json({ ok: true });
@@ -415,14 +406,13 @@ app.delete('/user/apikey', async (req, res) => {
   }
 });
 
-// --- Session management ---
+// Create session
 app.post('/session', async (req, res) => {
   try {
     const { tfid } = req.body || {};
     if (!tfid) return res.status(400).json({ error: 'tfid_required' });
 
     const users = await readJsonSafe(USERS_FILE, { users: [] });
-    if (!users.users) users.users = [];
     const found = users.users.find(u => u.tfid === tfid);
     if (!found) return res.status(404).json({ error: 'user_not_found' });
 
@@ -466,8 +456,8 @@ app.get('/sessions/:tfid', async (req, res) => {
   }
 });
 
-// --- Main message endpoint: receives user message, appends to session, proxies to OpenRouter, saves assistant reply ---
-// body: { tfid, sessionId, text }
+// Main message endpoint: proxies to OpenRouter and saves assistant reply
+// Body: { tfid, sessionId, text }
 app.post('/message', async (req, res) => {
   try {
     const { tfid, sessionId, text } = req.body || {};
@@ -492,11 +482,10 @@ app.post('/message', async (req, res) => {
       if (m.role === 'user') return { role: 'user', content: m.content || m.text || '' };
       return { role: 'assistant', content: m.content || m.text || '' };
     });
-
     const tail = history.slice(-HISTORY_MESSAGE_LIMIT);
     const payloadMessages = [sys, ...tail];
 
-    // Determine API key to use (user encrypted key if present & MASTER_KEY available, else global)
+    // Determine API key to use (user-saved encrypted key if present & MASTER_KEY available, else global)
     let apiKeyToUse = OPENROUTER_API_KEY;
     if (user.encryptedApiKey) {
       if (hasMasterKey()) {
@@ -511,13 +500,13 @@ app.post('/message', async (req, res) => {
       }
     }
 
-    // Deliberate & refine pipeline (tries small passes)
+    // Deliberate & refine pipeline
     const baseForApi = payloadMessages;
     let finalAnswer = await deliberateAndRefine(baseForApi, apiKeyToUse, text);
     let parsedForDebug = null;
     let finishReason = null;
 
-    // Fallback single call if no answer from pipeline
+    // Fallback if no answer
     if (!finalAnswer || !finalAnswer.trim()) {
       const result = await postToOpenRouterWithFallback({
         model: MODEL,
@@ -527,61 +516,50 @@ app.post('/message', async (req, res) => {
       }, apiKeyToUse, 2);
 
       if (!result.ok) {
-        const snippet = (result.rawText || result.parsed || result.error || '').toString().slice(0, 1000);
+        const snippet = (result.rawText || JSON.stringify(result.parsed) || result.error || '').toString().slice(0, 1000);
         console.warn('[proxy] OpenRouter final failure', result.status, snippet);
-        // Do not persist assistant reply on failure; session already has user message saved.
+        // session already has user message saved; persist it
         await writeJsonSafe(SESSIONS_FILE, sessionsData);
-        if (result.status === 402) {
-          return res.status(402).json({ error: 'openrouter_insufficient_credits', details: snippet });
-        }
+        if (result.status === 402) return res.status(402).json({ error: 'openrouter_insufficient_credits', details: snippet });
         return res.status(result.status || 500).json({ error: 'openrouter_error', details: snippet });
       }
 
       parsedForDebug = result.parsed;
-      finalAnswer = extractAssistantText(result.parsed) || "(Repons pa klè)";
-      // capture finish reason if present
+      finalAnswer = extractAssistantText(result.parsed) || "(Response unclear)";
       try {
         const c = (result.parsed.choices && result.parsed.choices[0]) || null;
         finishReason = c && (c.finish_reason || c.native_finish_reason || null);
       } catch {}
-    } else {
-      // If the deliberate/refine pipeline returned text, we won't have parsed object.
-      // leave parsedForDebug null.
     }
 
-    // If the model likely truncated output due to max tokens, append user-friendly note
+    // Append note if truncated by max tokens
     if (finishReason === 'max_output_tokens' || finishReason === 'length') {
-      finalAnswer = `${finalAnswer}\n\n(Nòt: repons la te long epi li te koupe. Si ou vle repons pi long, ogmante DEFAULT_MAX_TOKENS oswa retire kèk mesaj nan istwa.)`;
+      finalAnswer = `${finalAnswer}\n\n(Note: the model's output was truncated due to token limits. Increase DEFAULT_MAX_TOKENS or reduce history to get longer responses.)`;
     }
 
-    // Only save non-empty assistant messages
+    // Save assistant message only if non-empty
     if (finalAnswer && finalAnswer.trim()) {
       const assistantMsg = { role: 'assistant', content: finalAnswer, ts: Date.now() };
       session.messages.push(assistantMsg);
       await writeJsonSafe(SESSIONS_FILE, sessionsData);
     } else {
-      // persist the session (user message already there)
+      // persist sessions (user message present)
       await writeJsonSafe(SESSIONS_FILE, sessionsData);
-      console.warn('Not saving empty assistant response for session', sessionId);
     }
 
-    // Prepare response to client: never include full raw parsed provider JSON
+    // Response to client: never include full raw provider JSON. If DEV_DEBUG=1 include sanitized snippet.
     const resp = { assistant: finalAnswer };
     if (DEV_DEBUG && parsedForDebug) {
       resp.debug = safeSnippetFromParsed(parsedForDebug, 800);
-    } else if (DEV_DEBUG && !parsedForDebug) {
-      resp.debug = '(no parsed provider object available for this response)';
     }
     return res.json(resp);
-
   } catch (err) {
     console.error('/message error', err);
     res.status(500).json({ error: 'server_error', details: err.message });
   }
 });
 
-// Optional compatibility proxy /openrouter (for legacy UI) — uses global key
-// This endpoint returns a SANITIZED parsed provider object (no 'reasoning' or internal debug fields)
+// Optional compatibility proxy /openrouter (legacy UI) — returns sanitized parsed provider object
 app.post('/openrouter', async (req, res) => {
   try {
     const bodyToSend = {
@@ -593,14 +571,13 @@ app.post('/openrouter', async (req, res) => {
 
     const result = await postToOpenRouterWithFallback(bodyToSend, OPENROUTER_API_KEY, 2);
     if (!result.ok) {
-      const snippet = (result.rawText || result.parsed || result.error || '').toString().slice(0, 1000);
+      const snippet = (result.rawText || JSON.stringify(result.parsed) || result.error || '').toString().slice(0, 1000);
       if (result.status === 402) return res.status(402).json({ error: 'openrouter_insufficient_credits', details: snippet });
       return res.status(result.status || 500).json({ error: 'openrouter_error', details: snippet });
     }
 
     if (result.parsed) {
       const safe = deepSanitize(result.parsed);
-      // If DEV_DEBUG, include tiny snippet of original raw (truncated) — careful to not expose internal fields
       if (DEV_DEBUG) {
         return res.status(result.status).json({ sanitized: safe, debug_snippet: safeSnippetFromParsed(result.parsed, 1000) });
       }
@@ -614,7 +591,7 @@ app.post('/openrouter', async (req, res) => {
   }
 });
 
-// Diagnostic route to test outbound connectivity to OpenRouter
+// Diag route
 app.get('/diag', async (req, res) => {
   try {
     const r = await fetch('https://openrouter.ai/');
@@ -627,6 +604,7 @@ app.get('/diag', async (req, res) => {
 
 app.get('/health', (req, res) => res.json({ ok: true }));
 
+// Global error handlers
 process.on('unhandledRejection', (r) => console.error('unhandledRejection', r));
 process.on('uncaughtException', (err) => {
   console.error('uncaughtException', err);
@@ -634,6 +612,6 @@ process.on('uncaughtException', (err) => {
 });
 
 app.listen(PORT, () => {
-  console.log(`Proxy serveur: http://localhost:${PORT}`);
-  console.log('Serving static files from ./public');
+  console.log(`Proxy server listening on http://localhost:${PORT}`);
+  console.log('Serving static files from ./public if present');
 });
