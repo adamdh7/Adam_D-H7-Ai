@@ -1,4 +1,3 @@
-// index.mjs
 import express from 'express';
 import cors from 'cors';
 import path from 'path';
@@ -8,6 +7,7 @@ import { promises as fs } from 'fs';
 import crypto from 'crypto';
 
 dotenv.config();
+
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
@@ -21,13 +21,17 @@ const OPENROUTER_API_KEY = process.env.OPENROUTER_API_KEY;
 const OPENROUTER_ENDPOINT = process.env.OPENROUTER_ENDPOINT || 'https://openrouter.ai/api/v1/chat/completions';
 const OPENROUTER_MODEL = process.env.OPENROUTER_MODEL || 'gpt-5';
 
-// keep last 7 messages as most important
-const HISTORY_TAIL = 7;
+const HISTORY_TAIL = Number(process.env.HISTORY_TAIL) || 7;
+const DEFAULT_MAX_TOKENS = Number(process.env.DEFAULT_MAX_TOKENS) || 1000;
+const MAX_ALLOWED_TOKENS = Number(process.env.MAX_ALLOWED_TOKENS) || 1000;
+const MAX_CONTEXT_TOKENS = Number(process.env.MAX_CONTEXT_TOKENS) || 2048;
 
-const DEFAULT_MAX_TOKENS = Number(process.env.DEFAULT_MAX_TOKENS) || 150;
 const DEFAULT_TIMEOUT_MS = Number(process.env.DEFAULT_TIMEOUT_MS) || 30000;
-const MAX_RETRIES = Number(process.env.MAX_RETRIES) || 3;
-const DEFAULT_USER_NAME = process.env.DEFAULT_USER_NAME || "User";
+const MAX_RETRIES = Number(process.env.MAX_RETRIES) || 5;
+const MAX_CONTINUATIONS = Number(process.env.MAX_CONTINUATIONS) || 6;
+const DEFAULT_USER_NAME = process.env.DEFAULT_USER_NAME || 'User';
+
+const CHARS_PER_TOKEN_SAFE = 3.5;
 
 const TF_CHARS = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz123456789';
 const USERS_FILE = path.join(__dirname, 'user.json');
@@ -35,12 +39,12 @@ const SESSIONS_FILE = path.join(__dirname, 'sessions.json');
 const USER_HISTORY_FILE = path.join(__dirname, 'user_history.json');
 
 if (!OPENROUTER_API_KEY) {
-  console.error('ERROR: OPENROUTER_API_KEY missing in .env');
+  console.error('ERROR: OPENROUTER_API_KEY missing in .env — set OPENROUTER_API_KEY and restart.');
   process.exit(1);
 }
 
 app.use(cors({ origin: true }));
-app.use(express.json({ limit: '20mb' }));
+app.use(express.json({ limit: '70mb' }));
 app.use(express.urlencoded({ extended: false }));
 app.use(express.static(path.join(__dirname, 'public')));
 
@@ -67,7 +71,7 @@ async function writeJsonSafe(filePath, obj) {
 }
 
 /* ---------------------------
-   TFID generator
+   TFID
    --------------------------- */
 function generateTFIDRaw(len = 7) {
   const bytes = crypto.randomBytes(len);
@@ -86,7 +90,7 @@ async function ensureUniqueTFID() {
 }
 
 /* ---------------------------
-   Simple marker helpers (server-side only)
+   Marker helpers (server only)
    --------------------------- */
 const MARKER = '***Terminé***';
 function ensureMarkerBefore(text) {
@@ -103,29 +107,87 @@ function extractVisibleFromWrapped(wrapped) {
 }
 
 /* ---------------------------
-   Extract assistant text from provider response (NO sanitization)
+   Token/char estimation helpers
    --------------------------- */
+function estimateTokensFromString(s) {
+  if (!s) return 0;
+  return Math.ceil(s.length / CHARS_PER_TOKEN_SAFE);
+}
+function estimateTokensFromMessagesArray(arr) {
+  let total = 0;
+  for (const m of arr) {
+    total += estimateTokensFromString(String(m.content || ''));
+    total += 3; // overhead per message
+  }
+  return total;
+}
+
+/* ---------------------------
+   Robust extractor (no sanitization)
+   --------------------------- */
+function findFirstStringInObject(obj) {
+  if (obj == null) return null;
+  if (typeof obj === 'string' && obj.trim()) return obj.trim();
+  if (Array.isArray(obj)) {
+    for (const it of obj) {
+      const s = findFirstStringInObject(it);
+      if (s) return s;
+    }
+    return null;
+  }
+  if (typeof obj === 'object') {
+    const tryKeys = ['content', 'text', 'message', 'output_text', 'response', 'result', 'parts'];
+    for (const k of tryKeys) {
+      if (obj[k] !== undefined) {
+        const s = findFirstStringInObject(obj[k]);
+        if (s) return s;
+      }
+    }
+    for (const k of Object.keys(obj)) {
+      const s = findFirstStringInObject(obj[k]);
+      if (s) return s;
+    }
+  }
+  return null;
+}
 function extractAssistantText(payloadJson) {
   if (!payloadJson) return null;
   try {
     if (Array.isArray(payloadJson.choices) && payloadJson.choices.length) {
       const c = payloadJson.choices[0];
-      const content = c?.message?.content ?? c?.text ?? '';
-      if (typeof content === 'string' && content.trim()) {
-        return content.trim();
+      const mc = c?.message?.content;
+      if (typeof mc === 'string' && mc.trim()) return mc.trim();
+      const fromMc = findFirstStringInObject(mc);
+      if (fromMc) return fromMc;
+      if (typeof c.text === 'string' && c.text.trim()) return c.text.trim();
+      if (c?.delta) {
+        const d = c.delta.content ?? c.delta;
+        const s = findFirstStringInObject(d);
+        if (s) return s;
+      }
+      if (Array.isArray(c?.message?.reasoning_details)) {
+        for (const it of c.message.reasoning_details) {
+          if (!it) continue;
+          if (it.type && String(it.type).toLowerCase().includes('encrypted')) continue;
+          if (typeof it.summary === 'string' && it.summary.trim()) return it.summary.trim();
+          const fromIt = findFirstStringInObject(it);
+          if (fromIt) return fromIt;
+        }
       }
     }
-    for (const k of ['response','output','result','text']) {
-      if (typeof payloadJson[k] === 'string' && payloadJson[k].trim()) {
-        return payloadJson[k].trim();
-      }
+    for (const k of ['response','output','result','text','output_text']) {
+      if (typeof payloadJson[k] === 'string' && payloadJson[k].trim()) return payloadJson[k].trim();
+      const candidate = findFirstStringInObject(payloadJson[k]);
+      if (candidate) return candidate;
     }
-  } catch (e) {}
+  } catch (e) {
+    console.error('extractAssistantText error', e);
+  }
   return null;
 }
 
 /* ---------------------------
-   fetch wrapper with timeout
+   fetchWithTimeout
    --------------------------- */
 async function fetchWithTimeout(url, options = {}, timeoutMs = DEFAULT_TIMEOUT_MS) {
   const controller = new AbortController();
@@ -144,28 +206,23 @@ async function fetchWithTimeout(url, options = {}, timeoutMs = DEFAULT_TIMEOUT_M
 }
 
 /* ---------------------------
-   Init files
+   Init storage files (top-level await OK)
    --------------------------- */
 await readJsonSafe(USERS_FILE, { users: [] });
 await readJsonSafe(SESSIONS_FILE, { sessions: {} });
 await readJsonSafe(USER_HISTORY_FILE, { histories: {} });
 
 /* ---------------------------
-   System prompt (minimal, no forcing)
+   System prompt
    --------------------------- */
 function makeSystemPrompt(tfid, sessionId, userName = null) {
-  const display = userName || DEFAULT_USER_NAME || tfid;
   const identity = "You are Adam_D'H7 everyone's friend created by D'H7 | Tergene.";
-  const lines = [
-    identity,
-    `Session: ${sessionId}`,
-    'Respond naturally to the user message.'
-  ];
+  const lines = [identity, `Session: ${sessionId}`, 'Réponds en français, naturellement.'];
   return { role: 'system', content: lines.join(' ') };
 }
 
 /* ---------------------------
-   Endpoints: user/session/history
+   Routes: user / session / history
    --------------------------- */
 app.post('/user', async (req, res) => {
   try {
@@ -205,10 +262,10 @@ app.post('/session', async (req, res) => {
     const session = { sessionId, tfid, createdAt: new Date().toISOString(), messages: [] };
     sessionsData.sessions[sessionId] = session;
     await writeJsonSafe(SESSIONS_FILE, sessionsData);
-    res.json({ sessionId, createdAt: session.createdAt });
+    return res.json({ sessionId, createdAt: session.createdAt });
   } catch (err) {
     console.error('/session error', err);
-    res.status(500).json({ error: 'server_error', details: String(err?.message || err) });
+    return res.status(500).json({ error: 'server_error', details: String(err?.message || err) });
   }
 });
 
@@ -218,14 +275,15 @@ app.get('/history/:tfid/:n?', async (req, res) => {
     const n = Math.max(1, Math.min(1000, Number(req.params.n || 100)));
     const hist = await readJsonSafe(USER_HISTORY_FILE, { histories: {} });
     const arr = (hist.histories && hist.histories[tfid]) ? hist.histories[tfid] : [];
-    res.json(arr.slice(-n));
+    return res.json(arr.slice(-n));
   } catch (err) {
-    res.status(500).json({ error: String(err?.message || err) });
+    console.error('/history error', err);
+    return res.status(500).json({ error: String(err?.message || err) });
   }
 });
 
 /* ---------------------------
-   /message endpoint (minimal behaviour)
+   /message endpoint (dynamic trimming + continuations)
    --------------------------- */
 app.post('/message', async (req, res) => {
   try {
@@ -256,50 +314,148 @@ app.post('/message', async (req, res) => {
     await writeJsonSafe(SESSIONS_FILE, sessionsData);
     await writeJsonSafe(USER_HISTORY_FILE, hist);
 
-    // Build messages: minimal system prompt + last HISTORY_TAIL messages + final user message
+    // Build system message
     const systemMsg = makeSystemPrompt(tfid, sessionId, user.name || DEFAULT_USER_NAME);
-    const tail = (session.messages || []).slice(-HISTORY_TAIL).map(m => ({ role: m.role, content: m.content || '' }));
-    // Ensure last user message is last entry
-    const messagesForProvider = [systemMsg, ...tail, { role: 'user', content: clean }];
 
-    // call provider (simple retry)
+    // Start with last HISTORY_TAIL messages and trim older ones dynamically
+    let tail = (session.messages || []).slice(-HISTORY_TAIL).map(m => ({ role: m.role, content: m.content || '' }));
+
+    function estimatePromptTokens(systemObj, tailArr, finalUserContent) {
+      let tokens = estimateTokensFromString(systemObj.content);
+      tokens += estimateTokensFromMessagesArray(tailArr);
+      tokens += estimateTokensFromString(finalUserContent) + 3;
+      return tokens;
+    }
+
+    // Trim oldest messages until prompt_tokens + DEFAULT_MAX_TOKENS <= MAX_CONTEXT_TOKENS
+    let promptTokens = estimatePromptTokens(systemMsg, tail, clean);
+    while (tail.length > 0 && (promptTokens + DEFAULT_MAX_TOKENS > MAX_CONTEXT_TOKENS)) {
+      tail.shift();
+      promptTokens = estimatePromptTokens(systemMsg, tail, clean);
+    }
+
+    if (promptTokens + DEFAULT_MAX_TOKENS > MAX_CONTEXT_TOKENS) {
+      console.warn('Prompt still large after trimming; provider may truncate. Estimated prompt tokens:', promptTokens);
+    } else {
+      console.log('Prompt tokens after trimming:', promptTokens, ' Response tokens cap:', DEFAULT_MAX_TOKENS);
+    }
+
+    // abbreviation helper: keep start and end of long messages
+    function abbreviateMessages(arr, maxChars = 400) {
+      return arr.map(m => {
+        if (!m || !m.content) return { role: m.role, content: '' };
+        let c = String(m.content);
+        if (c.length <= maxChars) return { role: m.role, content: c };
+        const head = c.slice(0, Math.floor(maxChars * 0.6));
+        const tailPiece = c.slice(-Math.floor(maxChars * 0.3));
+        return { role: m.role, content: head + '\n…\n' + tailPiece };
+      });
+    }
+
+    // Prepare abbreviated tail to free tokens
+    let abbreviatedTail = abbreviateMessages(tail, 400);
+    let messagesForProvider = [systemMsg, ...abbreviatedTail, { role: 'user', content: clean }];
+
+    // Provider call + continuation logic
     let attempt = 0;
+    let currentMax = DEFAULT_MAX_TOKENS; // 200
     let lastResp = null;
+    let accumulated = ''; // accumulate parts of the assistant answer
+    let continuations = 0;
     let assistantText = null;
+
     while (attempt < MAX_RETRIES) {
       attempt++;
       const payload = {
         model: OPENROUTER_MODEL,
         messages: messagesForProvider,
-        max_tokens: DEFAULT_MAX_TOKENS,
+        max_tokens: currentMax,
+        max_output_tokens: currentMax,
         temperature: 0.2
       };
+
       lastResp = await fetchWithTimeout(OPENROUTER_ENDPOINT, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + OPENROUTER_API_KEY },
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': 'Bearer ' + OPENROUTER_API_KEY
+        },
         body: JSON.stringify(payload)
       }, DEFAULT_TIMEOUT_MS);
 
       if (!lastResp.ok) {
+        console.warn(`Provider call failed (attempt ${attempt}): status=${lastResp.status}`, lastResp.fetchError || '');
         continue;
       }
-      assistantText = extractAssistantText(lastResp.json);
-      if (assistantText) break;
+
+      const part = extractAssistantText(lastResp.json) || (lastResp.text && lastResp.text.trim()) || null;
+      if (part) {
+        accumulated = accumulated ? (accumulated + '\n' + part) : part;
+      }
+
+      const maybeChoice = lastResp.json?.choices?.[0];
+      const finishReason = maybeChoice?.finish_reason || maybeChoice?.native_finish_reason || null;
+
+      // if not truncated, finish
+      if (finishReason !== 'length' && finishReason !== 'max_output_tokens') {
+        assistantText = accumulated || null;
+        break;
+      }
+
+      // truncated:
+      console.warn(`Model truncated (finish_reason=${finishReason}) on attempt ${attempt}.`);
+
+      // try slight increase if allowed (but keep absolute cap)
+      const prev = currentMax;
+      currentMax = Math.min(MAX_ALLOWED_TOKENS, Math.max(currentMax + 16, Math.floor(currentMax * 1.1)));
+      if (currentMax !== prev && currentMax <= MAX_ALLOWED_TOKENS) {
+        console.warn(`Increasing max tokens ${prev} -> ${currentMax} and retrying.`);
+        continue;
+      }
+
+      // otherwise attempt continuation (if we have some accumulated text)
+      if (accumulated && continuations < MAX_CONTINUATIONS) {
+        continuations++;
+        // build next messagesForProvider by adding assistant partial and a short user "continue" message
+        messagesForProvider = [
+          systemMsg,
+          ...abbreviateMessages(tail, 300),
+          { role: 'assistant', content: accumulated },
+          { role: 'user', content: 'Continue la réponse précédente.' }
+        ];
+        console.warn(`Issuing continuation #${continuations} to fetch remaining content.`);
+        continue;
+      } else {
+        console.warn('No more continuation attempts allowed or nothing accumulated. Breaking.');
+        assistantText = accumulated || null;
+        break;
+      }
+    } // end provider attempts loop
+
+    // If we accumulated a final text, store & return
+    if (assistantText) {
+      const wrapped = ensureMarkerBefore(assistantText);
+      session.messages.push({ role: 'assistant', content: wrapped, ts: Date.now() });
+      hist.histories[tfid].push({ role: 'assistant', content: wrapped, sessionId, ts: Date.now() });
+      await writeJsonSafe(SESSIONS_FILE, sessionsData);
+      await writeJsonSafe(USER_HISTORY_FILE, hist);
+      const visible = extractVisibleFromWrapped(wrapped);
+      return res.json({ assistant: visible });
     }
 
-    if (!assistantText) {
-      assistantText = "Désolé, je n'ai pas pu obtenir de réponse. Peux-tu reformuler ?";
+    // If we get here and lastResp has raw text, return raw provider body (no friendly fallback)
+    console.error('No assistant text extracted after retries/continuations.');
+    if (lastResp) {
+      console.error('Provider lastResp status:', lastResp.status);
+      if (lastResp.fetchError) console.error('Provider fetchError:', lastResp.fetchError);
+      if (lastResp.text && lastResp.text.trim()) {
+        const statusToSend = Number.isInteger(lastResp.status) ? lastResp.status : 502;
+        return res.status(statusToSend).type('text').send(lastResp.text);
+      }
     }
 
-    // store assistant message (server adds marker for storage only)
-    const wrapped = ensureMarkerBefore(assistantText);
-    session.messages.push({ role: 'assistant', content: wrapped, ts: Date.now() });
-    hist.histories[tfid].push({ role: 'assistant', content: wrapped, sessionId, ts: Date.now() });
-    await writeJsonSafe(SESSIONS_FILE, sessionsData);
-    await writeJsonSafe(USER_HISTORY_FILE, hist);
-
-    const visible = extractVisibleFromWrapped(wrapped);
-    return res.json({ assistant: visible });
+    // final: nothing to return
+    return res.status(502).json({ error: 'no_response_from_provider' });
 
   } catch (err) {
     console.error('/message error', err);
@@ -308,10 +464,13 @@ app.post('/message', async (req, res) => {
 });
 
 /* ---------------------------
-   health
+   Health
    --------------------------- */
 app.get('/health', (req, res) => res.json({ ok: true }));
 
+/* ---------------------------
+   Start server
+   --------------------------- */
 app.listen(PORT, () => {
-  console.log(`Server listening on http://localhost:${PORT} (HISTORY_TAIL=${HISTORY_TAIL})`);
+  console.log(`Server listening on http://localhost:${PORT} (HISTORY_TAIL=${HISTORY_TAIL}, RESPONSE_MAX_TOKENS=${DEFAULT_MAX_TOKENS})`);
 });
