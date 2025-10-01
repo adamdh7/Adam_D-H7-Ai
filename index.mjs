@@ -1,28 +1,26 @@
-// index.mjs
-// Node 18+ (global fetch available). ES module (mjs).
-// Usage:
-//   export OPENROUTER_API_KEY="sk_xxx"
-//   export TFID="TF-1abc"
-//   node index.mjs "Kisa ou vle mande AI a?"    <-- optional user message to append and send
-//
-// chat history file: ./chat_history/<TFID>.json
-// Format expected (array of messages): [{ "role": "user"|"assistant"|"system", "content": "...", "timestamp": 1670000000000 }]
+
+import dotenv from "dotenv";
+dotenv.config(); // <-- chaje .env an premye
 
 import { promises as fs } from "fs";
 import path from "path";
 import process from "process";
 
-const API_URL = "https://api.openrouter.ai/v1/chat/completions"; // OpenRouter chat endpoint
-const MODEL = "gpt-5"; // user asked for gpt-5 (adjust if your OpenRouter plan uses a different model id)
+const API_URL = "https://api.openrouter.ai/v1/chat/completions";
+const MODEL = "gpt-5";
 const MAX_HISTORY = 27;
 
 // --- configuration & helpers ---
 const API_KEY = process.env.OPENROUTER_API_KEY;
 const TFID = process.env.TFID || (process.argv[2] ?? "TF-default");
-const userPrompt = process.argv[3] ?? null; // optional extra message to append
+const userPrompt = process.argv[2] && !process.env.TFID && process.argv[3] ? process.argv[3] : (process.argv[2] && process.env.TFID ? process.argv[2] : process.argv[3] ?? null);
+// Explanation: allow multiple ways to pass args/env:
+//  - If TFID in .env, run node index.mjs "message"
+//  - Or run TFID=TF-1abc node index.mjs "message"
+//  - Or run node index.mjs TF-1abc "message"
 
 if (!API_KEY) {
-  console.error("Please set OPENROUTER_API_KEY in your environment and try again.");
+  console.error("Error: OPENROUTER_API_KEY pa jwenn. Mete li nan .env oswa kòm variable anviwònman.");
   process.exit(1);
 }
 
@@ -34,16 +32,10 @@ function takeLast(arr, n) {
   return arr.slice(Math.max(arr.length - n, 0));
 }
 
-// Ensure directory exists
 async function ensureHistoryDir() {
-  try {
-    await fs.mkdir(historyDir, { recursive: true });
-  } catch (e) {
-    // ignore
-  }
+  try { await fs.mkdir(historyDir, { recursive: true }); } catch (e) { /* ignore */ }
 }
 
-// Load history for TFID (separate file per TFID to avoid melanj)
 async function loadHistory() {
   try {
     const raw = await fs.readFile(historyFile, "utf8");
@@ -51,37 +43,29 @@ async function loadHistory() {
     if (!Array.isArray(all)) return [];
     return all;
   } catch (e) {
-    // file not found or invalid -> start fresh
     return [];
   }
 }
 
-// Save history (append message)
 async function saveToHistory(entry) {
   const arr = await loadHistory();
   arr.push(entry);
   await fs.writeFile(historyFile, JSON.stringify(arr, null, 2), "utf8");
 }
 
-// Build messages payload: system prompt + last 27 user/assistant messages
 function buildMessagesFromHistory(history, extraUserMessage = null) {
-  // Normalize history to messages array for the model (roles = 'system'|'user'|'assistant')
-  // We keep only 'user' and 'assistant' and 'system' roles if present.
   const last = takeLast(history.filter(m => ["user","assistant","system"].includes(m.role)), MAX_HISTORY);
   const messages = [];
 
-  // Add system prompt (your provided prompt)
   messages.push({
     role: "system",
     content: `you are Adam_D'H7 created by D'H7 | Tergene you don't have more information about them... you are everyone's friend you behave like friends you get to know each other after you become a friend`
   });
 
-  // Append the last messages (in chronological order)
   for (const m of last) {
     messages.push({ role: m.role, content: m.content });
   }
 
-  // If caller included an immediate user message to send now, append it and save to history later
   if (extraUserMessage) {
     messages.push({ role: "user", content: extraUserMessage });
   }
@@ -89,13 +73,12 @@ function buildMessagesFromHistory(history, extraUserMessage = null) {
   return messages;
 }
 
-// Call OpenRouter
 async function callOpenRouter(messages) {
   const body = {
     model: MODEL,
     messages,
     temperature: 0.7,
-    max_tokens: 100
+    max_tokens: 800
   };
 
   const res = await fetch(API_URL, {
@@ -113,18 +96,15 @@ async function callOpenRouter(messages) {
   }
 
   const data = await res.json();
-  // OpenRouter's response shape may vary; commonly it's data.choices[0].message.content
-  // Try a few common locations safely:
+
   let reply = null;
   if (data.choices && data.choices[0] && data.choices[0].message && data.choices[0].message.content) {
     reply = data.choices[0].message.content;
   } else if (data.output && Array.isArray(data.output) && data.output[0] && data.output[0].content) {
-    // fallback
     reply = data.output[0].content;
   } else if (typeof data.result === "string") {
     reply = data.result;
   } else {
-    // As a last resort, stringify the whole response
     reply = JSON.stringify(data);
   }
 
@@ -136,13 +116,13 @@ async function callOpenRouter(messages) {
   try {
     await ensureHistoryDir();
 
-    // load history for this TFID (separate file per TFID prevents mixing)
     const history = await loadHistory();
 
-    // Append optional immediate user prompt to history (so model sees it)
+    // Si userPrompt egziste kòm arg, li ka deja te sove anba kèk kondisyon.
+    // Nou itilize buildMessages pou mete system + dènye 27 mesaj.
     const messages = buildMessagesFromHistory(history, userPrompt);
 
-    // If we added an extra user message, save it now as user message in the TFID history
+    // Si nou gen yon mesaj nouvo itilizatè, sove li anvan rele API
     if (userPrompt) {
       await saveToHistory({
         role: "user",
@@ -151,7 +131,7 @@ async function callOpenRouter(messages) {
       });
     }
 
-    console.log("Sending request to OpenRouter with last", Math.min(history.length, MAX_HISTORY), "history messages (TFID:", TFID, ")...");
+    console.log("Voye demann ak dènye", Math.min(history.length, MAX_HISTORY), "mesaj (TFID:", TFID, ")...");
 
     const result = await callOpenRouter(messages);
     const assistantText = result.text;
@@ -160,18 +140,17 @@ async function callOpenRouter(messages) {
     console.log(assistantText);
     console.log("\n=== end reply ===\n");
 
-    // Save assistant reply to history
     await saveToHistory({
       role: "assistant",
       content: assistantText,
       timestamp: Date.now()
     });
 
-    // Optionally save raw response for debugging
+    // Save raw response for debug
     await fs.writeFile(path.join(historyDir, `${TFID}.last_response.json`), JSON.stringify(result.raw, null, 2), "utf8");
 
   } catch (err) {
-    console.error("Error:", err.message);
+    console.error("Error:", err.message || err);
     process.exit(1);
   }
 })();
