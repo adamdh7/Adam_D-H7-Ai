@@ -2,10 +2,8 @@
 <html lang="ht">
 <head>
   <meta charset="UTF-8"/>
-  <!-- Prevent zooming on mobile -->
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no"/>
   <title>Adam_D'H7</title>
-    <!-- PWA manifest et icônes -->
   <link rel="manifest" href="manifest.json" />
   <link rel="icon" type="image/jpeg" href="https://res.cloudinary.com/dglludnfq/image/upload/v1759278052/tf-stream-url/Screenshot_20250930_202003_Gallery.jpg" />
   <link rel="apple-touch-icon" href="https://res.cloudinary.com/dglludnfq/image/upload/v1759278052/tf-stream-url/Screenshot_20250930_202003_Gallery.jpg" />
@@ -27,8 +25,6 @@
       --header-h: 56px;
       --form-h: 84px;
     }
-
-    /* Prevent page scrolling (only chat-box should scroll) */
     html,body{
       height:100%;
       margin:0;
@@ -39,11 +35,9 @@
       -webkit-text-size-adjust:100%;
       -webkit-overflow-scrolling:touch;
       overscroll-behavior-y:none;
-      overflow:hidden; /* page won't scroll */
+      overflow:hidden;
       touch-action:pan-y;
     }
-
-    /* Fixed header - always top */
     header{
       background:var(--panel);
       height:var(--header-h);
@@ -61,8 +55,6 @@
     }
     .menu-btn{position:absolute;left:12px;font-size:22px;cursor:pointer;color:var(--ai-text)}
     .name-title{font-weight:800;color:var(--name-gray);font-size:20px;letter-spacing:0.2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-
-    /* Chat area - positioned between header and form (JS will tweak top/bottom on resize) */
     .chat-box{
       position:fixed;
       left:0;
@@ -79,7 +71,6 @@
       box-sizing:border-box;
       -webkit-overflow-scrolling:touch;
     }
-
     .message{margin:12px 0;max-width:72%;position:relative;overflow-wrap:anywhere;word-break:break-word;white-space:pre-wrap}
     .message.user{align-self:flex-end}
     .message.bot{align-self:flex-start}
@@ -87,8 +78,6 @@
     .message.bot .content{background:var(--ai-bubble);color:var(--ai-text);border-radius:18px;padding:10px 14px;border:1px solid var(--border)}
     .content{font-size:15px;line-height:1.35}
     .timestamp{font-size:11px;color:var(--timestamp);margin-top:6px;text-align:right}
-
-    /* Thinking: inside bot bubble, slow dots */
     .message.bot.thinking .content{display:flex;align-items:center;justify-content:flex-start;gap:10px;background:var(--ai-bubble);padding:8px 12px}
     .thinking-dots{display:inline-flex;gap:8px}
     .thinking-dots span{
@@ -103,8 +92,6 @@
       55% {opacity:0.35; transform:translateY(0);}
       100% {opacity:0.12; transform:translateY(0);}
     }
-
-    /* Sidebar overlays header when active */
     .sidebar{position:fixed;top:0;left:-100%;width:80%;height:100%;background:var(--panel);z-index:1001;box-shadow:2px 0 12px rgba(0,0,0,0.7);transition:left .28s ease;padding:18px;color:var(--ai-text);box-sizing:border-box}
     .sidebar.active{left:0}
     .menu-header{display:flex;justify-content:space-between;align-items:center;margin-bottom:12px}
@@ -112,17 +99,11 @@
     .chat-list li{padding:8px;border-radius:6px;cursor:pointer;transition:background .18s;margin-bottom:10px;color:var(--ai-text)}
     .chat-list li:hover{background:rgba(255,255,255,0.02)}
     .sidebar .new-chat-btn{background:none;border:1px solid rgba(255,255,255,0.06);color:var(--ai-text);padding:6px 10px;border-radius:8px;cursor:pointer;font-size:14px}
-
-    /* Code modal & copy */
     .code-modal{background:#000;color:var(--ai-text);font-family:Menlo,monospace;padding:18px;border-radius:10px;margin:14px 0;max-width:90%;white-space:pre-wrap;border:1px solid rgba(255,255,255,0.03)}
     .copy-btn{position:absolute;top:10px;right:10px;background:var(--user-blue);color:var(--user-text);border:none;border-radius:6px;padding:6px 10px;cursor:pointer}
-
-    /* Form fixed bottom */
     form{display:flex;padding:12px;background:var(--panel);border-top:1px solid rgba(255,255,255,0.03);position:fixed;bottom:0;left:0;right:0;align-items:center;gap:10px;height:var(--form-h);box-sizing:border-box}
     textarea{flex:1;padding:10px;font-size:15px;border-radius:18px;border:1px solid rgba(255,255,255,0.04);outline:none;resize:none;height:56px;background:#050505;color:var(--ai-text);box-sizing:border-box;width:100%}
     textarea::placeholder{color:rgba(255,255,255,0.18)}
-
-    /* Send button styled for icon-only */
     .send{
       display:inline-flex;
       align-items:center;
@@ -136,8 +117,8 @@
       cursor:pointer;
       box-shadow:0 6px 18px rgba(11,61,145,0.14);
     }
+    .send[disabled]{ opacity:0.5; cursor:default; pointer-events:none; }
     .send svg{ width:20px; height:20px; display:block; filter:invert(1) contrast(200%); }
-
     @media (max-width:600px){
       .chat-box{padding:12px;padding-top: calc(var(--header-h) + 8px);padding-bottom: calc(var(--form-h) + 8px)}
       header{font-size:18px}
@@ -162,7 +143,7 @@
 
   <form id="chatForm" autocomplete="off" novalidate>
     <textarea id="userInput" placeholder="Adam_D'H7 le meilleure assistant" aria-label="Message"></textarea>
-    <button class="send" type="submit" aria-label="Send">
+    <button id="sendBtn" class="send" type="submit" aria-label="Send">
       <svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true" focusable="false">
         <path d="M2 21L23 12L2 3L8 12L2 21Z" fill="currentColor"/>
       </svg>
@@ -170,13 +151,12 @@
   </form>
 
   <script>
-    // -------------------------
-    // Helpers + layout
-    // -------------------------
+    // -------- layout helpers --------
     const headerEl = document.querySelector('header');
     const chatBox = document.getElementById('chatBox');
     const formEl = document.querySelector('form');
     const textarea = document.getElementById('userInput');
+    const sendBtn = document.getElementById('sendBtn');
 
     function scrollToBottom(immediate = true) {
       try {
@@ -186,33 +166,24 @@
     }
 
     function adjustLayoutForViewport() {
-      // Set chatBox top/bottom based on actual header/form heights
       const headerH = headerEl.offsetHeight || 56;
       const formH = formEl.offsetHeight || 84;
       chatBox.style.top = headerH + 'px';
       chatBox.style.bottom = formH + 'px';
-      // ensure no extra padding top causes spacing
       chatBox.style.paddingTop = '12px';
-      // small delay to let mobile keyboard/layout settle
       setTimeout(()=> scrollToBottom(true), 60);
     }
 
     window.addEventListener('load', ()=>{ adjustLayoutForViewport(); });
     window.addEventListener('resize', ()=>{ adjustLayoutForViewport(); });
 
-    textarea.addEventListener('focus', ()=>{
-      setTimeout(()=> adjustLayoutForViewport(), 80);
-      setTimeout(()=> scrollToBottom(true), 150);
-    });
+    textarea.addEventListener('focus', ()=>{ setTimeout(()=> adjustLayoutForViewport(), 80); setTimeout(()=> scrollToBottom(true), 150); });
     textarea.addEventListener('blur', ()=>{ setTimeout(()=> adjustLayoutForViewport(), 80); });
     textarea.addEventListener('input', ()=>{ scrollToBottom(true); });
 
-    // prevent pinch-zoom gesture where possible
     window.addEventListener('gesturestart', e => e.preventDefault());
 
-    // -------------------------
-    // Session & UI state (local)
-    // -------------------------
+    // -------- session & UI state (local) --------
     if(!document.getElementById('headerName').textContent.trim()) document.getElementById('headerName').textContent = "Adam_D'H7";
     if (Notification && Notification.permission !== 'granted') Notification.requestPermission();
 
@@ -276,16 +247,12 @@
         }
         chatBox.appendChild(wrap);
       });
-      // ensure scroll stays at bottom inside chat-box
       scrollToBottom();
     }
 
-    // -------------------------
-    // Paste => immediate send (no maxlength)
-    // -------------------------
+    // -------- paste behavior (submit after paste) --------
     const chatForm = document.getElementById('chatForm');
     textarea.addEventListener('paste', (e)=>{
-      // allow default paste then submit shortly after so textarea is populated
       setTimeout(()=> {
         const val = textarea.value;
         if (!val || !val.trim()) return;
@@ -294,9 +261,7 @@
       }, 20);
     });
 
-    // -------------------------
-    // Utility: robust extraction of assistant text from server response
-    // -------------------------
+    // -------- robust extract helper --------
     function collectStrings(value) {
       if (value == null) return '';
       if (typeof value === 'string') return value;
@@ -332,49 +297,68 @@
       return null;
     }
 
-    // -------------------------
-    // Remove timestamps from UI (requirement #3)
-    // -------------------------
+    // -------- remove timestamps helper --------
     function removeAllTimestamps() {
       const ts = chatBox.querySelectorAll('.timestamp');
       ts.forEach(el => el.remove());
     }
 
-    // -------------------------
-    // Submit flow: ALWAYS produce a bot reply (network fallback handled)
-    // -------------------------
+    // -------- prevent duplicate sends: inFlight flag + clientMsgId --------
+    let inFlight = false; // single inflight per client
+    function genClientMsgId() {
+      if (typeof crypto !== 'undefined' && crypto.randomUUID) return crypto.randomUUID();
+      return Date.now().toString(36) + '-' + Math.random().toString(36).slice(2,9);
+    }
+
+    // -------- submit flow --------
     chatForm.addEventListener('submit', async (e)=>{
       e.preventDefault();
       const raw = textarea.value;
       const text = (typeof raw === 'string') ? raw.trim() : '';
       if (!text) return;
 
-      // Requirement 3: remove timestamps when user sends next message
+      // prevent double send
+      if (inFlight) {
+        console.log('Send already in progress — ignoring duplicate submit');
+        return;
+      }
+      inFlight = true;
+      sendBtn.disabled = true;
+
+      // remove timestamps (as requested)
       removeAllTimestamps();
 
       if (currentSession === null) newChat();
       const sess = sessions[currentSession];
 
       // push user locally
-      sess.messages.push({ sender: 'user', text, ts: Date.now() });
+      const userMessage = { sender: 'user', text, ts: Date.now() };
+      sess.messages.push(userMessage);
       if (sess.messages[0] && typeof sess.messages[0].text === 'string') sess.title = sess.messages[0].text.slice(0,100);
       save(); renderList(); renderBox();
 
-      // clear input so user can continue pasting
+      // clear input so user can continue typing/pasting
       textarea.value = '';
+      textarea.focus();
 
       // add thinking bubble
       const thinking = { sender: 'thinking', ts: Date.now() };
       sess.messages.push(thinking); save(); renderBox();
 
-      let assistantPushed = false;
+      // create clientMsgId for idempotency
+      const clientMsgId = genClientMsgId();
+
+      let assistantAdded = false;
+      const abortController = new AbortController();
+      const TIMEOUT_MS = 30_000; // 30s timeout
+      const timeoutId = setTimeout(()=> abortController.abort(), TIMEOUT_MS);
 
       try {
         // ensure user exists
         let tfid = localStorage.getItem('tfid');
         if (!tfid) {
           const ru = await fetch('/user', { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({}) });
-          if (!ru.ok) throw new Error('/user failed');
+          if (!ru.ok) throw new Error('/user failed ' + ru.status);
           const ju = await ru.json(); tfid = ju.tfid; localStorage.setItem('tfid', tfid);
         }
 
@@ -382,24 +366,28 @@
         let sessionId = localStorage.getItem('currentSessionId');
         if (!sessionId) {
           const rs = await fetch('/session', { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({ tfid }) });
-          if (!rs.ok) throw new Error('/session failed');
+          if (!rs.ok) throw new Error('/session failed ' + rs.status);
           const js = await rs.json(); sessionId = js.sessionId; localStorage.setItem('currentSessionId', sessionId);
         }
 
-        // call /message
+        // make fetch with clientMsgId and abort support
         const r = await fetch('/message', {
           method: 'POST',
           headers: {'Content-Type':'application/json'},
-          body: JSON.stringify({ tfid: localStorage.getItem('tfid'), sessionId: localStorage.getItem('currentSessionId'), text })
+          body: JSON.stringify({ tfid: localStorage.getItem('tfid'), sessionId: localStorage.getItem('currentSessionId'), text, clientMsgId }),
+          signal: abortController.signal
         });
+
+        clearTimeout(timeoutId);
 
         if (!r.ok) {
           const txt = await r.text().catch(()=>null);
           console.warn('/message returned not ok', r.status, txt && txt.slice ? txt.slice(0,200) : txt);
-          throw new Error('/message fail');
+          throw new Error('/message fail ' + r.status);
         }
 
         const jr = await r.json();
+
         // remove thinking bubble locally
         const idx = sess.messages.indexOf(thinking); if (idx > -1) sess.messages.splice(idx, 1);
 
@@ -412,21 +400,31 @@
         if (!assistantText || !assistantText.trim()) assistantText = '(Repons pa klè)';
 
         sess.messages.push({ sender: 'bot', text: assistantText, ts: Date.now() });
-        assistantPushed = true;
+        assistantAdded = true;
         save(); renderBox();
 
         if (document.hidden && Notification.permission === 'granted') new Notification('TF-Chat', { body: 'Nouvo mesaj TF-Chat' });
 
       } catch (err) {
-        console.warn('Error sending message or parsing response, will fallback. Err:', err && err.message ? err.message : err);
+        console.warn('Error sending message or parsing response:', err && err.message ? err.message : err);
+        // remove thinking bubble if present
+        try { const idx2 = sess.messages.findIndex(m => m.sender === 'thinking'); if (idx2 !== -1) sess.messages.splice(idx2, 1); } catch(e){}
+        // Add fallback assistant note if nothing else
+        const lastBot = [...sess.messages].reverse().find(m => m.sender === 'bot');
+        if (!lastBot) {
+          sess.messages.push({ sender: 'bot', text: 'Repons la vini. (egzanp)', ts: Date.now() });
+        }
+        save(); renderBox();
       } finally {
+        clearTimeout(timeoutId);
+        inFlight = false;
+        sendBtn.disabled = false;
         // ensure thinking removed
         try {
           const idx2 = sess.messages.findIndex(m => m.sender === 'thinking');
           if (idx2 !== -1) sess.messages.splice(idx2, 1);
         } catch(e){}
-
-        // if no assistant message was added, add fallback now
+        // ensure there's at least a bot reply
         const lastBot = [...sess.messages].reverse().find(m => m.sender === 'bot');
         if (!lastBot) {
           sess.messages.push({ sender: 'bot', text: 'Repons la vini. (egzanp)', ts: Date.now() });
@@ -435,34 +433,35 @@
       }
     });
 
-    // Enter + no Shift => insert newline (keep this behavior)
+    // Enter = send (no Shift). Shift+Enter = newline
     textarea.addEventListener('keydown', (e)=>{
       if (e.key === 'Enter' && !e.shiftKey) {
         e.preventDefault();
-        const s = textarea.selectionStart, v = textarea.value;
-        textarea.value = v.slice(0,s) + '\n' + v.slice(s);
-        textarea.selectionStart = textarea.selectionEnd = s+1;
+        // submit form programmatically
+        if (typeof chatForm.requestSubmit === 'function') chatForm.requestSubmit();
+        else chatForm.dispatchEvent(new Event('submit', { cancelable: true }));
       }
     });
 
-    // On load: render saved sessions
+    // initial render
     if (sessions.length) renderList(), renderBox();
     adjustLayoutForViewport();
-      window.addEventListener('load', () => {
-    if ('serviceWorker' in navigator) {
-      navigator.serviceWorker.register('/sw.js', { scope: '/' })
-        .then(reg => {
-          navigator.serviceWorker.ready.then(regReady => {
-            if (regReady.active && regReady.active.postMessage) {
-              regReady.active.postMessage({ type: 'LIST_CACHES' });
-            }
-          });
-        })
-        .catch(()=>{/* silent */});
 
-      navigator.serviceWorker.addEventListener('message', ()=>{/* silent */});
-    }
-  });
+    // service worker registration (unchanged)
+    window.addEventListener('load', () => {
+      if ('serviceWorker' in navigator) {
+        navigator.serviceWorker.register('/sw.js', { scope: '/' })
+          .then(reg => {
+            navigator.serviceWorker.ready.then(regReady => {
+              if (regReady.active && regReady.active.postMessage) {
+                regReady.active.postMessage({ type: 'LIST_CACHES' });
+              }
+            });
+          })
+          .catch(()=>{/* silent */});
+        navigator.serviceWorker.addEventListener('message', ()=>{/* silent */});
+      }
+    });
   </script>
 </body>
-  </html>
+    </html>
