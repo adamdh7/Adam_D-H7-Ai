@@ -22,13 +22,13 @@ const OPENROUTER_MODEL = process.env.OPENROUTER_MODEL || 'gpt-5';
 // By default keep 27 messages of chat context
 const HISTORY_TAIL = Number(process.env.HISTORY_TAIL) || 27;
 
-const DEFAULT_MAX_TOKENS = Number(process.env.DEFAULT_MAX_TOKENS) || 256;
+const DEFAULT_MAX_TOKENS = Number(process.env.DEFAULT_MAX_TOKENS) || 100;
 const DEFAULT_TIMEOUT_MS = Number(process.env.DEFAULT_TIMEOUT_MS) || 30000;
 const MAX_RETRIES = Number(process.env.MAX_RETRIES) || 3;
 const MIN_TOKENS = Number(process.env.MIN_TOKENS) || 16;
 const DEFAULT_USER_NAME = process.env.DEFAULT_USER_NAME || "Adam_D'H7";
-const MAX_ALLOWED_TOKENS = Number(process.env.MAX_ALLOWED_TOKENS) || 1024;
-const RECOVERY_MAX_TOKENS_CAP = Number(process.env.RECOVERY_MAX_TOKENS_CAP) || 48;
+const MAX_ALLOWED_TOKENS = Number(process.env.MAX_ALLOWED_TOKENS) || 200;
+const RECOVERY_MAX_TOKENS_CAP = Number(process.env.RECOVERY_MAX_TOKENS_CAP) || 50;
 
 // TF-7CHIF: allowed characters for ID (A..Z, a..z, 1..9)
 const TF_CHARS = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz123456789';
