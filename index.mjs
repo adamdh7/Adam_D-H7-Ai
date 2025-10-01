@@ -32,12 +32,11 @@ const MAX_ALLOWED_TOKENS = Number(process.env.MAX_ALLOWED_TOKENS) || 200;
 const RECOVERY_MAX_TOKENS_CAP = Number(process.env.RECOVERY_MAX_TOKENS_CAP) || 50;
 
 // Toggle marker behavior via .env (string "true" enables it).
-// For correct "***Terminé***" handling default is true.
 const ENABLE_MARKER = process.env.ENABLE_MARKER ? process.env.ENABLE_MARKER === 'true' : true;
 
 // Reflection pauses (ms) — default 2s each as requested
-const THINK_PROMPT_MS = Number(process.env.THINK_PROMPT_MS) || 2000;   // lire prompt pendant 2s
-const THINK_MESSAGES_MS = Number(process.env.THINK_MESSAGES_MS) || 2000; // lire messages pendant 2s
+const THINK_PROMPT_MS = Number(process.env.THINK_PROMPT_MS) || 2000;   // read prompt for 2s
+const THINK_MESSAGES_MS = Number(process.env.THINK_MESSAGES_MS) || 2000; // read messages for 2s
 
 const TF_CHARS = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz123456789';
 const USERS_FILE = path.join(__dirname, 'user.json');
@@ -106,12 +105,9 @@ async function ensureUniqueTFID() {
 /* ---------------------------
    MARKER helpers (internal)
    --------------------------- */
-// Marker is INTERNAL only. It marks end of internal reasoning and start of visible reply.
 const MARKER = '***Terminé***';
 
-// Put MARKER immediately before visible reply for storage; server will strip it before sending to front.
 function ensureMarkerBefore(text) {
-  // Always trim
   const t = text == null ? '' : String(text).trim();
   if (!ENABLE_MARKER) {
     return t;
@@ -121,8 +117,6 @@ function ensureMarkerBefore(text) {
   return `${MARKER}\n\n${t}`;
 }
 
-// VERY ROBUST extraction: return strictly text AFTER last marker (no marker)
-// Avoid returning fragments like "Term" or "Terminé" or stray stars.
 function extractVisibleFromWrapped(wrappedText) {
   if (!wrappedText || typeof wrappedText !== 'string') return '';
   const raw = wrappedText;
@@ -314,16 +308,13 @@ function sanitizeAssistantText(raw) {
     /^\s*\*{1,}.*\*{1,}\s*$/ // lines enclosed fully in asterisks (like **Considering user language**)
   ];
 
-  // Also short parenthetical meta like "(thinking...)" already partly covered
   const shortThinking = /^[\(\[]\s*(thinking|processing|loading|one moment|please wait|en train|m'ap panse|mwen panse|je réfléchis|estoy pensando|espera un momento)[\)\]]\.?$/i;
 
-  // Keep only lines that are not meta, but we'll also remove leading meta blocks
   const rawKept = [];
   for (let ln of lines) {
     if (!ln) continue;
     if (shortThinking.test(ln)) continue;
 
-    // if line matches any meta pattern -> mark as meta
     let isMeta = false;
     for (const p of metaLinePatterns) {
       if (p.test(ln)) { isMeta = true; break; }
@@ -331,7 +322,6 @@ function sanitizeAssistantText(raw) {
     if (isMeta) {
       rawKept.push({ meta: true, text: ln });
     } else {
-      // remove superficial prefixes like "Assistant:" or "System:"
       const cleaned = ln.replace(/^(Assistant|System|AI|Bot|Response)[:\-\s]+/i, '').trim();
       rawKept.push({ meta: false, text: cleaned });
     }
@@ -339,19 +329,16 @@ function sanitizeAssistantText(raw) {
 
   if (!rawKept.length) return null;
 
-  // Remove leading meta-only block: many models print reasoning first then final reply.
+  // Remove leading meta-only block
   let firstNonMetaIndex = 0;
   while (firstNonMetaIndex < rawKept.length && rawKept[firstNonMetaIndex].meta) firstNonMetaIndex++;
   let kept = rawKept.slice(firstNonMetaIndex).map(o => o.text);
 
-  // If everything was meta, fallback to removing meta flags and keep last few lines
   if (!kept.length) {
-    // choose last non-empty lines (but strip meta markers)
     const lastTexts = rawKept.slice(-4).map(o => o.text);
     kept = lastTexts.filter(Boolean);
   }
 
-  // Join, normalize whitespace
   let out = kept.join('\n').replace(/\s{2,}/g, ' ').trim();
 
   // Restore code blocks placeholders
@@ -360,7 +347,6 @@ function sanitizeAssistantText(raw) {
     out = out.replace(ph, codeBlocks[i] || ph);
   }
 
-  // Final safety: don't return empty string
   return out === '' ? null : out;
 }
 
@@ -505,8 +491,8 @@ app.post('/session', async (req, res) => {
   try {
     const { tfid } = req.body || {};
     if (!tfid) return res.status(400).json({ error: 'tfid_required' });
-    const users = await readJsonSafe(USERS_FILE, { users: [] });
-    const found = (users.users || []).find(u => u.tfid === tfid);
+    const usersObj = await readJsonSafe(USERS_FILE, { users: [] });
+    const found = (usersObj.users || []).find(u => u.tfid === tfid);
     if (!found) return res.status(404).json({ error: 'user_not_found' });
     const sessionsData = await readJsonSafe(SESSIONS_FILE, { sessions: {} });
     sessionsData.sessions = sessionsData.sessions || {};
@@ -539,6 +525,37 @@ app.get('/history/:tfid/:n?', async (req, res) => {
     res.status(500).json({ error: err.message });
   }
 });
+
+/* ---------------------------
+   System prompt maker (detailed)
+   --------------------------- */
+function makeSystemPrompt(tfid, sessionId, userName = null) {
+  const display = userName || DEFAULT_USER_NAME || tfid;
+  // Detailed, explicit system prompt (English). Keep concise but thorough.
+  const contentLines = [
+    `You are Adam_D'H7, a reliable, polite, and helpful assistant built for ${display}. Session ID: ${sessionId}.`,
+    'PRIMARY OBJECTIVES:',
+    ' - Always prioritize the most recent USER message. Use earlier conversation only as background/context.',
+    ' - Reply naturally in the user language (French or Haitian Creole when appropriate). Use English only if the user used English or explicitly asked for English.',
+    ' - Never reveal internal chain-of-thought, private planning, or hidden reasoning. All internal deliberation must be kept internal.',
+    'VISIBLE OUTPUT RULES:',
+    ` - When you are ready to produce the final visible reply, place the exact marker string ${MARKER} on its own line immediately before the visible reply, and do not repeat the marker elsewhere in the visible text.`,
+    '   Example (must appear exactly like below):',
+    `   ${MARKER}`,
+    '   Bonjour ! Comment puis-je vous aider ?',
+    ' - If part of the reply is intended to be copyable (code, commands, configuration, multi-line examples), wrap those parts in triple backticks to form a code block so the UI can present them as copyable content.',
+    ' - Do NOT print meta lines such as "Considering user language", "Plan:", "Responding in French", or similar in the visible reply.',
+    'BEHAVIORAL GUIDELINES:',
+    ' - Keep responses concise and actionable. If a longer explanation is necessary, provide a 1–2 sentence summary first, then the details.',
+    ' - If a user requests code, return code only inside a code block unless the user explicitly asks for an explanation.',
+    ' - If you cannot answer precisely, apologize briefly and offer a clear next step or a single clarifying question.',
+    'SAFETY / PRIVACY:',
+    ' - Never request or include sensitive personal data (passwords, SSN, credit card numbers, etc.).',
+    ' - Avoid exposing internal markers or debug information; the server handles internal markers.',
+    'FINAL NOTE: Keep the visible reply practical and user-focused. Use the marker exactly as instructed and rely on system context to prioritize the latest user input.'
+  ];
+  return { role: 'system', content: contentLines.join(' ') };
+}
 
 /* ---------------------------
    Main /message endpoint
@@ -585,34 +602,32 @@ app.post('/message', async (req, res) => {
 
     const contextSystemMsg = {
       role: 'system',
-      content: `CONTEXT (background — use only to clarify). Treat the most recent user message as the highest priority:\n${contextText}`
+      content: `CONTEXT (background — use only to clarify). Treat the most recent user message as highest priority. Context snapshot:\n${contextText}`
     };
 
     // Add an explicit system instruction to prioritize final user message; instruct model not to output the literal marker.
     const prioritySystemMsg = {
       role: 'system',
       content: [
-        'IMPORTANT: Prioritize the final USER message below when producing your answer.',
-        'Do NOT output internal chain-of-thought or planning as visible text.',
-        `Do NOT include the literal marker string ${MARKER} in your response; the server handles any internal markings.`,
-        'When you finish internal reflection, put the marker EXACTLY on its own line before the visible reply: ' + MARKER
+        'IMPORTANT: PRIORITIZE the FINAL USER message included below when producing your answer.',
+        'DO NOT output internal chain-of-thought or planning as visible text.',
+        `Do NOT include the literal marker string ${MARKER} anywhere in visible output; the server will place or strip markers as needed.`,
+        `When you have completed internal reflection, put the marker EXACTLY on its own line immediately before the visible reply: ${MARKER}`,
+        'If you need to produce content users will copy (code, commands, config), wrap those blocks in triple backticks so the frontend can render them as copyable blocks.'
       ].join(' ')
     };
 
     // Final payload: system instructions, background context, then the user's current message LAST
     const payloadMessages = [systemMsg, contextSystemMsg, prioritySystemMsg, { role: 'user', content: clean }];
 
-    // ---------- LECTURE / RÉFLEXION ----------
-    // 1) lire prompt pendant THINK_PROMPT_MS (pause to simulate "reading the prompt")
+    // ---------- REFLECTION PAUSES ----------
     if (THINK_PROMPT_MS > 0) {
       await sleep(THINK_PROMPT_MS);
     }
-
-    // 2) lire messages pendant THINK_MESSAGES_MS (pause to simulate "reading messages")
     if (THINK_MESSAGES_MS > 0) {
       await sleep(THINK_MESSAGES_MS);
     }
-    // ---------- fin réflexion ----------
+    // ---------- end reflection ----------
 
     // provider call loop
     let attempt = 0;
@@ -665,7 +680,6 @@ app.post('/message', async (req, res) => {
             if (recoveryResp.ok) {
               const recovered = extractAssistantText(recoveryResp.json);
               if (recovered) {
-                // Wrap for storage
                 const wrapped = ensureMarkerBefore(recovered);
                 const visible = extractVisibleFromWrapped(wrapped);
                 session.messages.push({ role: 'assistant', content: wrapped, ts: Date.now() });
@@ -736,31 +750,6 @@ app.listen(PORT, () => {
 });
 
 /* ---------------------------
-   System prompt maker
-   --------------------------- */
-function makeSystemPrompt(tfid, sessionId, userName = null) {
-  const display = userName || DEFAULT_USER_NAME || tfid;
-  return {
-    role: 'system',
-    content: [
-      `You are Adam_D'H7, a helpful assistant created by D'H7 | Tergene for ${display}. Session: ${sessionId}.`,
-      'GUIDELINES:',
-      '- Reply naturally in the user\'s language (French / Haitian Creole as appropriate).',
-      '- PRIORITIZE the most recent USER message: treat earlier history only as context/background.',
-      '- DO NOT output internal chain-of-thought, private planning, or reasoning details as visible text.',
-      `- WHEN YOU HAVE A FINAL VISIBLE REPLY: place the marker EXACTLY on its own line IMMEDIATELY BEFORE the visible reply: ${MARKER}`,
-      `  Example (must be the same string, on its own line):`,
-      `  ${MARKER}`,
-      `  Bonjour ! Comment puis-je vous aider ?`,
-      `  When you send a message that you think the user might need a copy of, add `````` in the beginning and end',
-      '- Do NOT include meta lines like "Considering user language" or "Responding in French" in visible output.',
-      '- If you must think, keep it internal and do not print it. Then place the marker and the visible reply.',
-      '- When user requests code, return code only (in a code block) unless the user asks for explanation.'
-    ].join(' ')
-  };
-}
-
-/* ---------------------------
    Local fallback logic
    --------------------------- */
 function localFallback(userInput) {
@@ -783,4 +772,4 @@ function localFallbackUsingBank(userInput) {
   const best = findBestBankPhrase(userInput);
   if (best) return best;
   return localFallback(userInput);
-  }
+   }
