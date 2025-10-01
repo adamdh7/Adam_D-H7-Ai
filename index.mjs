@@ -9,7 +9,7 @@ import crypto from 'crypto';
 
 dotenv.config();
 
-// ensure fetch exists (Node18+ has it; otherwise dynamic import node-fetch)
+// ensure fetch exists (Node 18+ has global fetch). If not, try node-fetch dynamically.
 if (typeof globalThis.fetch !== 'function') {
   try {
     const nf = await import('node-fetch');
@@ -26,7 +26,7 @@ const __dirname = path.dirname(__filename);
 const app = express();
 const PORT = process.env.PORT || 3000;
 const OPENROUTER_API_KEY = (process.env.OPENROUTER_API_KEY || '').trim();
-const MASTER_KEY_HEX = (process.env.MASTER_KEY || '').trim(); // must be 64 hex chars for AES-256-GCM
+const MASTER_KEY_HEX = (process.env.MASTER_KEY || '').trim(); // optional: 64 hex chars
 const MODEL = process.env.MODEL || 'openai/gpt-5';
 const SYSTEM_PROMPT = (process.env.SYSTEM_PROMPT && process.env.SYSTEM_PROMPT.trim()) ||
   "You are Adam_D'H7. Created by D'H7 | Tergene. Be concise. Do NOT reveal internal chain-of-thought.";
@@ -38,6 +38,7 @@ const SESSIONS_FILE = path.join(__dirname, 'sessions.json');
 const DEFAULT_MAX_TOKENS = Number(process.env.DEFAULT_MAX_TOKENS) || 170;
 const DEFAULT_TEMPERATURE = Number(process.env.DEFAULT_TEMPERATURE) || 0.2;
 const HISTORY_MESSAGE_LIMIT = Number(process.env.HISTORY_MESSAGE_LIMIT) || 16;
+const DEV_DEBUG = process.env.DEV_DEBUG === '1';
 
 if (!OPENROUTER_API_KEY) {
   console.error('ERROR: OPENROUTER_API_KEY not set in .env (OPENROUTER_API_KEY). Exiting.');
@@ -120,7 +121,7 @@ async function ensureUniqueTFID() {
   return 'TF' + crypto.randomUUID().slice(0, 5).toUpperCase();
 }
 
-// --- Init data files
+// --- Init files ---
 await readJsonSafe(USERS_FILE, { users: [] });
 await readJsonSafe(SESSIONS_FILE, { sessions: {} });
 
@@ -172,6 +173,36 @@ function extractAssistantText(j) {
   const fallback = collectStrings(j).trim();
   if (fallback) return fallback;
   return null;
+}
+
+// --- Sanitize parsed provider objects before exposing them ---
+function deepSanitize(obj) {
+  if (obj == null || typeof obj !== 'object') return obj;
+  if (Array.isArray(obj)) return obj.map(v => deepSanitize(v));
+  const copy = {};
+  for (const k of Object.keys(obj)) {
+    const lower = String(k).toLowerCase();
+    // Keys we do NOT want to expose to UI
+    if (['logprobs', 'reasoning', 'reasoning_details', 'internal', 'debug', 'trace', 'metadata', 'safety', 'plugins'].includes(lower)) {
+      continue;
+    }
+    try {
+      copy[k] = deepSanitize(obj[k]);
+    } catch {
+      // skip problematic entries
+    }
+  }
+  return copy;
+}
+function safeSnippetFromParsed(parsed, maxChars = 800) {
+  try {
+    const sanitized = deepSanitize(parsed);
+    const s = JSON.stringify(sanitized);
+    if (s.length <= maxChars) return s;
+    return s.slice(0, maxChars) + '... (truncated)';
+  } catch (e) {
+    return '(unable to create snippet)';
+  }
 }
 
 // --- Parse allowed tokens from OpenRouter 402 error message ---
@@ -249,7 +280,7 @@ async function deliberateAndRefine(baseMessagesForApi, apiKeyToUse, userText) {
     const historyLen = (baseMessagesForApi.map(m => m.content || '').join(' ') || '').length;
     const contentLen = (userText || '').length + historyLen;
     let passes = 1 + Math.floor(contentLen / 800);
-    passes = Math.max(1, Math.min(passes, 2)); // restrict passes to 1..2 to keep cost low
+    passes = Math.max(1, Math.min(passes, 2)); // keep passes 1..2 for cost control
 
     const draftMessages = [
       ...baseMessagesForApi,
@@ -264,6 +295,10 @@ async function deliberateAndRefine(baseMessagesForApi, apiKeyToUse, userText) {
       temperature: DEFAULT_TEMPERATURE
     }, apiKeyToUse, 1);
 
+    if (!draftResult.ok) {
+      // fallback early
+      return null;
+    }
     let draft = extractAssistantText(draftResult.parsed) || '';
 
     for (let pass = 2; pass <= passes; pass++) {
@@ -281,6 +316,7 @@ async function deliberateAndRefine(baseMessagesForApi, apiKeyToUse, userText) {
         temperature: DEFAULT_TEMPERATURE
       }, apiKeyToUse, 1);
 
+      if (!refineResult.ok) break;
       const refined = extractAssistantText(refineResult.parsed);
       if (refined && refined.trim().length > 0) draft = refined;
     }
@@ -396,7 +432,7 @@ app.post('/session', async (req, res) => {
       sessionId,
       tfid,
       createdAt: new Date().toISOString(),
-      messages: [] // will store { role: 'user'|'assistant', content, ts }
+      messages: []
     };
     sessionsData.sessions[sessionId] = session;
     await writeJsonSafe(SESSIONS_FILE, sessionsData);
@@ -476,10 +512,12 @@ app.post('/message', async (req, res) => {
     }
 
     // Deliberate & refine pipeline (tries small passes)
-    const baseForApi = payloadMessages; // already in provider-friendly roles
+    const baseForApi = payloadMessages;
     let finalAnswer = await deliberateAndRefine(baseForApi, apiKeyToUse, text);
+    let parsedForDebug = null;
+    let finishReason = null;
 
-    // Fallback single call if no answer
+    // Fallback single call if no answer from pipeline
     if (!finalAnswer || !finalAnswer.trim()) {
       const result = await postToOpenRouterWithFallback({
         model: MODEL,
@@ -492,26 +530,50 @@ app.post('/message', async (req, res) => {
         const snippet = (result.rawText || result.parsed || result.error || '').toString().slice(0, 1000);
         console.warn('[proxy] OpenRouter final failure', result.status, snippet);
         // Do not persist assistant reply on failure; session already has user message saved.
+        await writeJsonSafe(SESSIONS_FILE, sessionsData);
         if (result.status === 402) {
-          await writeJsonSafe(SESSIONS_FILE, sessionsData);
           return res.status(402).json({ error: 'openrouter_insufficient_credits', details: snippet });
         }
-        await writeJsonSafe(SESSIONS_FILE, sessionsData);
         return res.status(result.status || 500).json({ error: 'openrouter_error', details: snippet });
       }
 
+      parsedForDebug = result.parsed;
       finalAnswer = extractAssistantText(result.parsed) || "(Repons pa klè)";
+      // capture finish reason if present
+      try {
+        const c = (result.parsed.choices && result.parsed.choices[0]) || null;
+        finishReason = c && (c.finish_reason || c.native_finish_reason || null);
+      } catch {}
+    } else {
+      // If the deliberate/refine pipeline returned text, we won't have parsed object.
+      // leave parsedForDebug null.
     }
 
-    // save assistant message to session history
-    const assistantMsg = { role: 'assistant', content: finalAnswer, ts: Date.now() };
-    session.messages.push(assistantMsg);
+    // If the model likely truncated output due to max tokens, append user-friendly note
+    if (finishReason === 'max_output_tokens' || finishReason === 'length') {
+      finalAnswer = `${finalAnswer}\n\n(Nòt: repons la te long epi li te koupe. Si ou vle repons pi long, ogmante DEFAULT_MAX_TOKENS oswa retire kèk mesaj nan istwa.)`;
+    }
 
-    // persist sessions
-    await writeJsonSafe(SESSIONS_FILE, sessionsData);
+    // Only save non-empty assistant messages
+    if (finalAnswer && finalAnswer.trim()) {
+      const assistantMsg = { role: 'assistant', content: finalAnswer, ts: Date.now() };
+      session.messages.push(assistantMsg);
+      await writeJsonSafe(SESSIONS_FILE, sessionsData);
+    } else {
+      // persist the session (user message already there)
+      await writeJsonSafe(SESSIONS_FILE, sessionsData);
+      console.warn('Not saving empty assistant response for session', sessionId);
+    }
 
-    // return assistant text + raw provider response (optional: omitted heavy raw here)
-    res.json({ assistant: finalAnswer });
+    // Prepare response to client: never include full raw parsed provider JSON
+    const resp = { assistant: finalAnswer };
+    if (DEV_DEBUG && parsedForDebug) {
+      resp.debug = safeSnippetFromParsed(parsedForDebug, 800);
+    } else if (DEV_DEBUG && !parsedForDebug) {
+      resp.debug = '(no parsed provider object available for this response)';
+    }
+    return res.json(resp);
+
   } catch (err) {
     console.error('/message error', err);
     res.status(500).json({ error: 'server_error', details: err.message });
@@ -519,6 +581,7 @@ app.post('/message', async (req, res) => {
 });
 
 // Optional compatibility proxy /openrouter (for legacy UI) — uses global key
+// This endpoint returns a SANITIZED parsed provider object (no 'reasoning' or internal debug fields)
 app.post('/openrouter', async (req, res) => {
   try {
     const bodyToSend = {
@@ -535,9 +598,16 @@ app.post('/openrouter', async (req, res) => {
       return res.status(result.status || 500).json({ error: 'openrouter_error', details: snippet });
     }
 
-    if (result.parsed) return res.status(result.status).json(result.parsed);
-    return res.status(result.status).type('text').send(result.rawText);
+    if (result.parsed) {
+      const safe = deepSanitize(result.parsed);
+      // If DEV_DEBUG, include tiny snippet of original raw (truncated) — careful to not expose internal fields
+      if (DEV_DEBUG) {
+        return res.status(result.status).json({ sanitized: safe, debug_snippet: safeSnippetFromParsed(result.parsed, 1000) });
+      }
+      return res.status(result.status).json(safe);
+    }
 
+    return res.status(result.status).type('text').send('(no parsed response)');
   } catch (err) {
     console.error('/openrouter proxy error', err);
     res.status(500).json({ error: 'proxy_failed', details: String(err) });
