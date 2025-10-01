@@ -32,11 +32,12 @@ const MAX_ALLOWED_TOKENS = Number(process.env.MAX_ALLOWED_TOKENS) || 200;
 const RECOVERY_MAX_TOKENS_CAP = Number(process.env.RECOVERY_MAX_TOKENS_CAP) || 50;
 
 // Toggle marker behavior via .env (string "true" enables it).
+// Useful if you want server-side internal marker handling; set ENABLE_MARKER=false in .env to disable.
 const ENABLE_MARKER = process.env.ENABLE_MARKER ? process.env.ENABLE_MARKER === 'true' : true;
 
-// Reflection pauses (ms) — default 2s each as requested
-const THINK_PROMPT_MS = Number(process.env.THINK_PROMPT_MS) || 2000;   // read prompt for 2s
-const THINK_MESSAGES_MS = Number(process.env.THINK_MESSAGES_MS) || 2000; // read messages for 2s
+// Reflection pauses (ms) — set to 0 to avoid simulated thinking text
+const THINK_PROMPT_MS = Number(process.env.THINK_PROMPT_MS) || 0;
+const THINK_MESSAGES_MS = Number(process.env.THINK_MESSAGES_MS) || 0;
 
 const TF_CHARS = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz123456789';
 const USERS_FILE = path.join(__dirname, 'user.json');
@@ -278,7 +279,7 @@ function sanitizeAssistantText(raw) {
   // 2) Split lines and normalize
   const lines = temp.split(/\r?\n/).map(l => l.replace(/\t/g,' ').trim());
 
-  // Patterns considered meta/internal/reasoning
+  // Patterns considered meta/internal/reasoning (includes English, French, Creole short forms)
   const metaLinePatterns = [
     /^\s*Generating\b/i,
     /^\s*Creation\b/i,
@@ -296,8 +297,8 @@ function sanitizeAssistantText(raw) {
     /^\s*\**\s*Responding\b/i,
     /^\s*\**\s*Responding in\b/i,
     /^\s*\**\s*Considering user\b/i,
-    /^\s*\**\s*I\s+(think|believe|see|will|should)\b/i,
-    /^\s*\**\s*The user's?\s+/i,
+    /^\s*\**\s*I\s+(think|believe|see|will|should|need)\b/i,
+    /^\s*\**\s*I need to respond\b/i,
     /^\s*\**\s*(Because|Since|Therefore)\b/i,
     /^\s*\**\s*Thoughts?\b/i,
     /^\s*\**\s*Reasoning\b/i,
@@ -305,7 +306,10 @@ function sanitizeAssistantText(raw) {
     /^\s*\**\s*Conclusion\b/i,
     /^\s*\**\s*Respond in\b/i,
     /^\s*<\/?[^>]+>/i, // html tags
-    /^\s*\*{1,}.*\*{1,}\s*$/ // lines enclosed fully in asterisks (like **Considering user language**)
+    /^\s*\*{1,}.*\*{1,}\s*$/, // lines enclosed fully in asterisks
+    // French / Creole short meta forms
+    /^\s*(Je\s+dois|Je\s+pense|Je\s+réponds|En\s+réponse)\b/i,
+    /^\s*(m'ap panse|mwen panse|je réfléchis)\b/i
   ];
 
   const shortThinking = /^[\(\[]\s*(thinking|processing|loading|one moment|please wait|en train|m'ap panse|mwen panse|je réfléchis|estoy pensando|espera un momento)[\)\]]\.?$/i;
@@ -455,6 +459,36 @@ await loadPhraseBank();
 await buildPhraseBankFromHistory();
 
 /* ---------------------------
+   System prompt maker (detailed & strict)
+   --------------------------- */
+function makeSystemPrompt(tfid, sessionId, userName = null) {
+  const display = userName || DEFAULT_USER_NAME || tfid;
+  const contentLines = [
+    `You are Adam_D'H7, a reliable, polite, and helpful assistant built for ${display}. Session ID: ${sessionId}.`,
+    'PRIMARY OBJECTIVES:',
+    ' - Always prioritize the most recent USER message. Use earlier conversation only as background/context.',
+    ' - Reply naturally in the user language (French or Haitian Creole when appropriate). Use English only if the user used English or explicitly asked for English.',
+    ' - Never reveal internal chain-of-thought, private planning, or hidden reasoning. All internal deliberation must be kept internal.',
+    'VISIBLE OUTPUT RULES:',
+    ` - When you are ready to produce the final visible reply, place the exact marker string ${MARKER} on its own line immediately before the visible reply, and do not repeat the marker elsewhere in the visible text.`,
+    '   Example (must appear exactly like below):',
+    `   ${MARKER}`,
+    '   Bonjour ! Comment puis-je vous aider ?',
+    ' - If part of the reply is intended to be copyable (code, commands, configuration, multi-line examples), wrap those parts in triple backticks to form a code block so the UI can present them as copyable content.',
+    ' - Do NOT print meta lines such as "Considering user language", "Plan:", "Responding in French", or similar in the visible reply.',
+    'BEHAVIORAL GUIDELINES:',
+    ' - Keep responses concise and actionable. If a longer explanation is necessary, provide a 1–2 sentence summary first, then the details.',
+    ' - If a user requests code, return code only inside a code block unless the user explicitly asks for an explanation.',
+    ' - If you cannot answer precisely, apologize briefly and offer a clear next step or a single clarifying question.',
+    'SAFETY / PRIVACY:',
+    ' - Never request or include sensitive personal data (passwords, SSN, credit card numbers, etc.).',
+    ' - Avoid exposing internal markers or debug information; the server handles internal markers.',
+    'FINAL NOTE: Keep the visible reply practical and user-focused. Use the marker exactly as instructed and rely on system context to prioritize the latest user input.'
+  ];
+  return { role: 'system', content: contentLines.join(' ') };
+}
+
+/* ---------------------------
    Endpoints: user, session, history
    --------------------------- */
 app.post('/user', async (req, res) => {
@@ -527,37 +561,6 @@ app.get('/history/:tfid/:n?', async (req, res) => {
 });
 
 /* ---------------------------
-   System prompt maker (detailed)
-   --------------------------- */
-function makeSystemPrompt(tfid, sessionId, userName = null) {
-  const display = userName || DEFAULT_USER_NAME || tfid;
-  // Detailed, explicit system prompt (English). Keep concise but thorough.
-  const contentLines = [
-    `You are Adam_D'H7, a reliable, polite, and helpful assistant built for ${display}. Session ID: ${sessionId}.`,
-    'PRIMARY OBJECTIVES:',
-    ' - Always prioritize the most recent USER message. Use earlier conversation only as background/context.',
-    ' - Reply naturally in the user language (French or Haitian Creole when appropriate). Use English only if the user used English or explicitly asked for English.',
-    ' - Never reveal internal chain-of-thought, private planning, or hidden reasoning. All internal deliberation must be kept internal.',
-    'VISIBLE OUTPUT RULES:',
-    ` - When you are ready to produce the final visible reply, place the exact marker string ${MARKER} on its own line immediately before the visible reply, and do not repeat the marker elsewhere in the visible text.`,
-    '   Example (must appear exactly like below):',
-    `   ${MARKER}`,
-    '   Bonjour ! Comment puis-je vous aider ?',
-    ' - If part of the reply is intended to be copyable (code, commands, configuration, multi-line examples), wrap those parts in triple backticks to form a code block so the UI can present them as copyable content.',
-    ' - Do NOT print meta lines such as "Considering user language", "Plan:", "Responding in French", or similar in the visible reply.',
-    'BEHAVIORAL GUIDELINES:',
-    ' - Keep responses concise and actionable. If a longer explanation is necessary, provide a 1–2 sentence summary first, then the details.',
-    ' - If a user requests code, return code only inside a code block unless the user explicitly asks for an explanation.',
-    ' - If you cannot answer precisely, apologize briefly and offer a clear next step or a single clarifying question.',
-    'SAFETY / PRIVACY:',
-    ' - Never request or include sensitive personal data (passwords, SSN, credit card numbers, etc.).',
-    ' - Avoid exposing internal markers or debug information; the server handles internal markers.',
-    'FINAL NOTE: Keep the visible reply practical and user-focused. Use the marker exactly as instructed and rely on system context to prioritize the latest user input.'
-  ];
-  return { role: 'system', content: contentLines.join(' ') };
-}
-
-/* ---------------------------
    Main /message endpoint
    --------------------------- */
 app.post('/message', async (req, res) => {
@@ -620,7 +623,7 @@ app.post('/message', async (req, res) => {
     // Final payload: system instructions, background context, then the user's current message LAST
     const payloadMessages = [systemMsg, contextSystemMsg, prioritySystemMsg, { role: 'user', content: clean }];
 
-    // ---------- REFLECTION PAUSES ----------
+    // ---------- REFLECTION PAUSES (disabled by default in this build) ----------
     if (THINK_PROMPT_MS > 0) {
       await sleep(THINK_PROMPT_MS);
     }
@@ -772,4 +775,4 @@ function localFallbackUsingBank(userInput) {
   const best = findBestBankPhrase(userInput);
   if (best) return best;
   return localFallback(userInput);
-   }
+}
