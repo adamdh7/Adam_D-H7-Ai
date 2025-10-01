@@ -22,13 +22,13 @@ const OPENROUTER_MODEL = process.env.OPENROUTER_MODEL || 'gpt-5';
 // By default keep 27 messages of chat context
 const HISTORY_TAIL = Number(process.env.HISTORY_TAIL) || 27;
 
-const DEFAULT_MAX_TOKENS = Number(process.env.DEFAULT_MAX_TOKENS) || 50;
+const DEFAULT_MAX_TOKENS = Number(process.env.DEFAULT_MAX_TOKENS) || 100;
 const DEFAULT_TIMEOUT_MS = Number(process.env.DEFAULT_TIMEOUT_MS) || 30000;
 const MAX_RETRIES = Number(process.env.MAX_RETRIES) || 3;
 const MIN_TOKENS = Number(process.env.MIN_TOKENS) || 16;
 const DEFAULT_USER_NAME = process.env.DEFAULT_USER_NAME || "Adam_D'H7";
-const MAX_ALLOWED_TOKENS = Number(process.env.MAX_ALLOWED_TOKENS) || 100;
-const RECOVERY_MAX_TOKENS_CAP = Number(process.env.RECOVERY_MAX_TOKENS_CAP) || 20;
+const MAX_ALLOWED_TOKENS = Number(process.env.MAX_ALLOWED_TOKENS) || 200;
+const RECOVERY_MAX_TOKENS_CAP = Number(process.env.RECOVERY_MAX_TOKENS_CAP) || 50;
 
 // TF-7CHIF: allowed characters for ID (A..Z, a..z, 1..9)
 const TF_CHARS = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz123456789';
@@ -47,6 +47,9 @@ app.use(cors({ origin: true }));
 app.use(express.json({ limit: '70mb' }));
 app.use(express.urlencoded({ extended: false }));
 app.use(express.static(path.join(__dirname, 'public')));
+
+// In-memory explanations store (simple). For production persist to DB/file.
+const EXPLANATIONS = {}; // { explainId: { status: 'pending'|'done'|'error', text: string|null, createdAt } }
 
 // --- file helpers ---
 async function readJsonSafe(filePath, defaultValue) {
@@ -91,11 +94,8 @@ await readJsonSafe(SESSIONS_FILE, { sessions: {} });
 await readJsonSafe(USER_HISTORY_FILE, { histories: {} });
 
 // --- custom system prompt (EN) ---
-// Note: user requested "Text in English", "AI must always finish its sentences" and
-// "AI should take its time and read the whole message before replying".
 function makeSystemPrompt(tfid, sessionId, userName = null) {
   const display = userName || DEFAULT_USER_NAME || tfid;
-  // Clear, English system prompt with constraints the user asked for.
   return {
     role: 'system',
     content:
@@ -119,7 +119,7 @@ function looksLikeChainOfThoughtLine(line) {
   const patterns = [
     'consider', 'considering', 'i think', "i'm thinking", 'i believe',
     'je pense', 'considérant', 'réflexion', 'analyse interne',
-    'thinking', 'chain of thought', 'reasoning', 'internal'
+    'thinking', 'chain of thought', 'reasoning', 'internal', 'i will', 'i would', "i'm going to", "let's"
   ];
   return patterns.some(p => s.includes(p));
 }
@@ -211,13 +211,51 @@ async function fetchWithTimeout(url, options = {}, timeoutMs = DEFAULT_TIMEOUT_M
   }
 }
 
+// --- Explanation job helper (fire & forget) ---
+function startExplanationJob(tfid, sessionId, clean, explainId, userName = null) {
+  (async () => {
+    try {
+      EXPLANATIONS[explainId] = { status: 'pending', text: null, createdAt: Date.now() };
+      const systemMsg = makeSystemPrompt(tfid, sessionId, userName);
+      const explainInstruction = {
+        role: 'user',
+        content: `Provide a concise, step-by-step explanation of the previous answer. Use short numbered steps or bullet points. Do NOT reveal internal chain-of-thought, private self-talk, or internal deliberation — only present a concise summary of the method, assumptions, and key steps. Finish your sentences.`
+      };
+      // Use the user's last message as context for the explanation
+      const payload = {
+        model: OPENROUTER_MODEL,
+        messages: [systemMsg, { role: 'user', content: clean }, explainInstruction],
+        max_tokens: RECOVERY_MAX_TOKENS_CAP,
+        max_output_tokens: RECOVERY_MAX_TOKENS_CAP,
+        temperature: 0.0
+      };
+      const resp = await fetchWithTimeout(OPENROUTER_ENDPOINT, {
+        method: 'POST',
+        headers: { 'Content-Type':'application/json', 'Authorization': 'Bearer ' + OPENROUTER_API_KEY },
+        body: JSON.stringify(payload)
+      }, DEFAULT_TIMEOUT_MS);
+
+      if (!resp || !resp.ok) {
+        EXPLANATIONS[explainId] = { status: 'error', text: `Explanation request failed (status ${resp?.status})`, createdAt: Date.now() };
+        return;
+      }
+
+      const raw = resp.json;
+      let expl = extractAssistantText(raw);
+      expl = sanitizeAssistantText(expl) || "Explanation unavailable.";
+      EXPLANATIONS[explainId] = { status: 'done', text: expl, createdAt: Date.now() };
+    } catch (err) {
+      EXPLANATIONS[explainId] = { status: 'error', text: String(err), createdAt: Date.now() };
+    }
+  })();
+}
+
 // --- helper: append to user_history (private per tfid) ---
 async function appendUserHistory(tfid, entry) {
   const hist = await readJsonSafe(USER_HISTORY_FILE, { histories: {} });
   hist.histories = hist.histories || {};
   hist.histories[tfid] = hist.histories[tfid] || [];
   hist.histories[tfid].push(entry);
-  // optional: cap history per user to e.g. 10000 messages to avoid unbounded growth
   const CAP = 10000;
   if (hist.histories[tfid].length > CAP) {
     hist.histories[tfid] = hist.histories[tfid].slice(-CAP);
@@ -240,7 +278,6 @@ app.post('/user', async (req, res) => {
     data.users = data.users || [];
     data.users.push(user);
     await writeJsonSafe(USERS_FILE, data);
-    // initialize empty history for this tfid
     const hist = await readJsonSafe(USER_HISTORY_FILE, { histories: {} });
     hist.histories = hist.histories || {};
     hist.histories[newTF] = hist.histories[newTF] || [];
@@ -293,6 +330,14 @@ app.get('/history/:tfid/:n?', async (req, res) => {
   }
 });
 
+// Explain endpoint for frontend polling
+app.get('/explain/:id', (req, res) => {
+  const id = req.params.id;
+  const rec = EXPLANATIONS[id];
+  if (!rec) return res.status(404).json({ error: 'explain_not_found' });
+  return res.json(rec);
+});
+
 // --- /message endpoint (402 handling, continuation & strict regen) ---
 app.post('/message', async (req, res) => {
   try {
@@ -323,7 +368,6 @@ app.post('/message', async (req, res) => {
       const local = `I did not understand "${clean}". Could you please clarify?`;
       session.messages = session.messages || [];
       session.messages.push({ role:'user', content: clean, ts: Date.now() });
-      // append to user history
       await appendUserHistory(tfid, { role: 'user', content: clean, sessionId, ts: Date.now() });
       session.messages.push({ role:'assistant', content: local, ts: Date.now() });
       await writeJsonSafe(SESSIONS_FILE, sessionsData);
@@ -406,14 +450,15 @@ app.post('/message', async (req, res) => {
                 session.messages.push({ role: 'assistant', content: recovered, ts: Date.now() });
                 await writeJsonSafe(SESSIONS_FILE, sessionsData);
                 await appendUserHistory(tfid, { role: 'assistant', content: recovered, sessionId, ts: Date.now() });
-                return res.json({ assistant: recovered });
+                // start explanation job? skip for low-credit paths to save tokens
+                return res.json({ assistant: recovered, explainId: null });
               }
             }
             const guidance = `Low credits (${affordable} tokens). Do you want a very short summary?`;
             session.messages.push({ role: 'assistant', content: guidance, ts: Date.now() });
             await writeJsonSafe(SESSIONS_FILE, sessionsData);
             await appendUserHistory(tfid, { role: 'assistant', content: guidance, sessionId, ts: Date.now() });
-            return res.json({ assistant: guidance });
+            return res.json({ assistant: guidance, explainId: null });
           }
 
           // otherwise reduce currentMax then retry
@@ -471,7 +516,11 @@ app.post('/message', async (req, res) => {
           session.messages.push({ role: 'assistant', content: contText, ts: Date.now() });
           await writeJsonSafe(SESSIONS_FILE, sessionsData);
           await appendUserHistory(tfid, { role: 'assistant', content: contText, sessionId, ts: Date.now() });
-          return res.json({ assistant: contText });
+          // for continuation path we can still attempt explanation
+          const explainId = crypto.randomUUID();
+          EXPLANATIONS[explainId] = { status: 'pending', text: null, createdAt: Date.now() };
+          startExplanationJob(tfid, sessionId, clean, explainId, user.name || DEFAULT_USER_NAME);
+          return res.json({ assistant: contText, explainId });
         }
       }
     }
@@ -501,7 +550,11 @@ app.post('/message', async (req, res) => {
             session.messages.push({ role: 'assistant', content: regenText, ts: Date.now() });
             await writeJsonSafe(SESSIONS_FILE, sessionsData);
             await appendUserHistory(tfid, { role: 'assistant', content: regenText, sessionId, ts: Date.now() });
-            return res.json({ assistant: regenText });
+            // start explanation job
+            const explainId = crypto.randomUUID();
+            EXPLANATIONS[explainId] = { status: 'pending', text: null, createdAt: Date.now() };
+            startExplanationJob(tfid, sessionId, clean, explainId, user.name || DEFAULT_USER_NAME);
+            return res.json({ assistant: regenText, explainId });
           }
         }
       }
@@ -513,7 +566,7 @@ app.post('/message', async (req, res) => {
       session.messages.push({ role: 'assistant', content: fallback, ts: Date.now() });
       await writeJsonSafe(SESSIONS_FILE, sessionsData);
       await appendUserHistory(tfid, { role: 'assistant', content: fallback, sessionId, ts: Date.now() });
-      return res.json({ assistant: fallback });
+      return res.json({ assistant: fallback, explainId: null });
     }
 
     // success: save assistant message in session and user history
@@ -521,7 +574,12 @@ app.post('/message', async (req, res) => {
     await writeJsonSafe(SESSIONS_FILE, sessionsData);
     await appendUserHistory(tfid, { role: 'assistant', content: assistantText, sessionId, ts: Date.now() });
 
-    return res.json({ assistant: assistantText });
+    // Start background explanation job and return explainId so frontend can poll
+    const explainId = crypto.randomUUID();
+    EXPLANATIONS[explainId] = { status: 'pending', text: null, createdAt: Date.now() };
+    startExplanationJob(tfid, sessionId, clean, explainId, user.name || DEFAULT_USER_NAME);
+
+    return res.json({ assistant: assistantText, explainId });
 
   } catch (err) {
     console.error('/message error', err);
