@@ -752,6 +752,7 @@ function makeSystemPrompt(tfid, sessionId, userName = null) {
       `  Example (must be the same string, on its own line):`,
       `  ${MARKER}`,
       `  Bonjour ! Comment puis-je vous aider ?`,
+      `  When you send a message that you think the user might need a copy of, add `````` in the beginning and end',
       '- Do NOT include meta lines like "Considering user language" or "Responding in French" in visible output.',
       '- If you must think, keep it internal and do not print it. Then place the marker and the visible reply.',
       '- When user requests code, return code only (in a code block) unless the user asks for explanation.'
