@@ -21,30 +21,20 @@ const OPENROUTER_ENDPOINT = process.env.OPENROUTER_ENDPOINT || 'https://openrout
 const OPENROUTER_MODEL = process.env.OPENROUTER_MODEL || 'gpt-5';
 
 const raw = process.env.HISTORY_TAIL;
-
 let HISTORY_TAIL = (raw !== undefined && raw !== '') ? Number(raw) : 7;
-
-if (!Number.isFinite(HISTORY_TAIL)) {
-  HISTORY_TAIL = 7;
-}
-
-// si itilizatè mete 0 oswa negatif => entèprete kòm "pran tout"
-if (HISTORY_TAIL <= 0) {
-  HISTORY_TAIL = Infinity;
-}
+if (!Number.isFinite(HISTORY_TAIL)) HISTORY_TAIL = 7;
+// Prevent using Infinity for slice(-HISTORY_TAIL)
+if (HISTORY_TAIL <= 0) HISTORY_TAIL = 7;
 
 const DEFAULT_MAX_TOKENS = Number(process.env.DEFAULT_MAX_TOKENS) || 1000;
 const MAX_ALLOWED_TOKENS = Number(process.env.MAX_ALLOWED_TOKENS) || 1000;
 const MAX_CONTEXT_TOKENS = Number(process.env.MAX_CONTEXT_TOKENS) || 2048;
-
-// Increased default timeout to reduce AbortError on slow networks
 const DEFAULT_TIMEOUT_MS = Number(process.env.DEFAULT_TIMEOUT_MS) || 120000;
 const MAX_RETRIES = Number(process.env.MAX_RETRIES) || 5;
 const MAX_CONTINUATIONS = Number(process.env.MAX_CONTINUATIONS) || 6;
 const DEFAULT_USER_NAME = process.env.DEFAULT_USER_NAME || 'User';
 
 const CHARS_PER_TOKEN_SAFE = 3.5;
-
 const TF_CHARS = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz123456789';
 const USERS_FILE = path.join(__dirname, 'user.json');
 const SESSIONS_FILE = path.join(__dirname, 'sessions.json');
@@ -55,10 +45,17 @@ if (!OPENROUTER_API_KEY) {
   process.exit(1);
 }
 
+/* Middlewares */
 app.use(cors({ origin: true }));
 app.use(express.json({ limit: '1000mb' }));
 app.use(express.urlencoded({ extended: false }));
 app.use(express.static(path.join(__dirname, 'public')));
+
+// Simple request logger (dev)
+app.use((req, res, next) => {
+  console.log(`[${new Date().toISOString()}] ${req.method} ${req.originalUrl} body:`, req.body || {});
+  next();
+});
 
 /* JSON helpers */
 async function readJsonSafe(filePath, defaultValue) {
@@ -126,101 +123,66 @@ function estimateTokensFromMessagesArray(arr) {
   return total;
 }
 
-/* ---------- Similarité / fallback search helpers (NEW) ---------- */
-
-function tokenizeWords(s) {
-  if (!s) return [];
-  return String(s).toLowerCase()
-    .normalize('NFKD')
-    .replace(/[\u0300-\u036f]/g, '') // remove diacritics
-    .split(/\s+/)
-    .map(w => w.replace(/[^\p{L}\p{N}]/gu, ''))
-    .filter(Boolean);
-}
-
-// Dice coefficient (word-level)
-function diceCoefficientWords(a, b) {
-  const A = tokenizeWords(a);
-  const B = tokenizeWords(b);
-  if (!A.length && !B.length) return 0;
-  const setA = new Set(A);
-  const setB = new Set(B);
-  let inter = 0;
-  for (const t of setA) if (setB.has(t)) inter++;
-  return (2 * inter) / (setA.size + setB.size) || 0;
-}
-
-// Longest common substring length (char-level) — normalized
-function longestCommonSubstringLen(a, b) {
-  if (!a || !b) return 0;
-  const A = String(a);
-  const B = String(b);
-  const m = A.length, n = B.length;
-  let max = 0;
-  const dp = new Uint16Array(n + 1);
-  for (let i = 1; i <= m; i++) {
-    let prev = 0;
-    for (let j = 1; j <= n; j++) {
-      const tmp = dp[j];
-      if (A[i - 1] === B[j - 1]) {
-        dp[j] = prev + 1;
-        if (dp[j] > max) max = dp[j];
-      } else {
-        dp[j] = 0;
+/* Robust extractor */
+function findFirstStringInObject(obj) {
+  if (obj == null) return null;
+  if (typeof obj === 'string' && obj.trim()) return obj.trim();
+  if (Array.isArray(obj)) {
+    for (const it of obj) {
+      const s = findFirstStringInObject(it);
+      if (s) return s;
+    }
+    return null;
+  }
+  if (typeof obj === 'object') {
+    const tryKeys = ['content', 'text', 'message', 'output_text', 'response', 'result', 'parts'];
+    for (const k of tryKeys) {
+      if (obj[k] !== undefined) {
+        const s = findFirstStringInObject(obj[k]);
+        if (s) return s;
       }
-      prev = tmp;
+    }
+    for (const k of Object.keys(obj)) {
+      const s = findFirstStringInObject(obj[k]);
+      if (s) return s;
     }
   }
-  return max;
+  return null;
 }
-
-function combinedSimilarity(a, b) {
-  const dice = diceCoefficientWords(a, b);
-  const lcs = longestCommonSubstringLen(a, b);
-  const avgLen = (String(a).length + String(b).length) / 2 || 1;
-  const lcsNorm = lcs / avgLen; // between 0..1
-  // combine both signals, give word overlap more weight
-  return Math.max(dice, (dice * 0.7 + lcsNorm * 0.3));
-}
-
-/**
- * Recherche la meilleure réponse passée (dans user_history.json) correspondant à `query`.
- * Renvoie { score, userContent, assistantContent, tfid, sessionId } ou null si rien.
- */
-async function findBestPastReply(query) {
-  const all = await readJsonSafe(USER_HISTORY_FILE, { histories: {} });
-  let best = null;
-  const histories = all.histories || {};
-  for (const [histTfid, arr] of Object.entries(histories)) {
-    if (!Array.isArray(arr)) continue;
-    for (let i = 0; i < arr.length; i++) {
-      const rec = arr[i];
-      if (!rec || rec.role !== 'user' || !rec.content) continue;
-      const score = combinedSimilarity(query, rec.content);
-      // chercher la prochaine réponse assistant dans le même sessionId après i
-      for (let j = i + 1; j < arr.length; j++) {
-        const next = arr[j];
-        if (!next) continue;
-        // si sessionId diffère, on arrête de chercher plus loin pour cet indice
-        if (rec.sessionId && next.sessionId && rec.sessionId !== next.sessionId) break;
-        if (next.role === 'assistant' && next.content) {
-          if (!best || score > best.score) {
-            best = {
-              score,
-              userContent: rec.content,
-              assistantContent: next.content,
-              tfid: histTfid,
-              sessionId: rec.sessionId || null,
-              idxUser: i,
-              idxAssistant: j
-            };
-          }
-          break; // on garde uniquement la réponse immédiate suivante
+function extractAssistantText(payloadJson) {
+  if (!payloadJson) return null;
+  try {
+    if (Array.isArray(payloadJson.choices) && payloadJson.choices.length) {
+      const c = payloadJson.choices[0];
+      const mc = c?.message?.content;
+      if (typeof mc === 'string' && mc.trim()) return mc.trim();
+      const fromMc = findFirstStringInObject(mc);
+      if (fromMc) return fromMc;
+      if (typeof c.text === 'string' && c.text.trim()) return c.text.trim();
+      if (c?.delta) {
+        const d = c.delta.content ?? c.delta;
+        const s = findFirstStringInObject(d);
+        if (s) return s;
+      }
+      if (Array.isArray(c?.message?.reasoning_details)) {
+        for (const it of c.message.reasoning_details) {
+          if (!it) continue;
+          if (it.type && String(it.type).toLowerCase().includes('encrypted')) continue;
+          if (typeof it.summary === 'string' && it.summary.trim()) return it.summary.trim();
+          const fromIt = findFirstStringInObject(it);
+          if (fromIt) return fromIt;
         }
       }
     }
+    for (const k of ['response','output','result','text','output_text']) {
+      if (typeof payloadJson[k] === 'string' && payloadJson[k].trim()) return payloadJson[k].trim();
+      const candidate = findFirstStringInObject(payloadJson[k]);
+      if (candidate) return candidate;
+    }
+  } catch (e) {
+    console.error('extractAssistantText error', e);
   }
-  return best;
+  return null;
 }
 
 /* sleep helper */
@@ -253,14 +215,40 @@ await readJsonSafe(USERS_FILE, { users: [] });
 await readJsonSafe(SESSIONS_FILE, { sessions: {} });
 await readJsonSafe(USER_HISTORY_FILE, { histories: {} });
 
-/* System prompt */
+/* System prompt builder */
 function makeSystemPrompt(tfid, sessionId, userName = null) {
-  const identity = "You are Adam_D'H7 everyone's friend created by D'H7 | Tergene. born on July 17, 2009, you are a Haitian ";
-  const lines = [identity, `Session: ${sessionId}`, 'responds to the user\'s language '];
+  const identity = "You are Adam_D'H7 everyone's friend created by D'H7 | Tergene. born on July 17, 2009, you are a Haitian assistant.";
+  const instructions = [
+    'Respond in the same language the user used.',
+    'When you include content the user may want to copy exactly (code, commands, snippets, or any text to copy), surround that exact content with triple backticks, for example: ```this is copyable```',
+    'Do NOT place commentary inside the triple backticks — only the exact content to copy should be between the backticks.',
+    `At the end of your full reply, include a single line with exactly ${MARKER} (three asterisks + Terminé + three asterisks), and after that line provide a concise final visible response for the user. The server will display the portion after ${MARKER}. If you already include ${MARKER}, do not duplicate it.`,
+    'Keep the reply concise and avoid revealing internal chain-of-thought or reasoning steps. If asked for code or copyable outputs, prefer triple-backtick blocks as explained above.'
+  ];
+  const lines = [identity, `Session: ${sessionId}`, ...instructions];
   return { role: 'system', content: lines.join(' ') };
 }
 
+/* Helper: format a session for client consumption */
+function formatSessionForClient(sessionObj) {
+  if (!sessionObj) return null;
+  const out = {
+    id: sessionObj.sessionId || sessionObj.id || null,
+    title: sessionObj.title || (sessionObj.messages && sessionObj.messages.length ? (String(sessionObj.messages[0].content || '').slice(0, 100)) : 'Chat'),
+    createdAt: sessionObj.createdAt || null,
+    messages: (sessionObj.messages || []).map(m => {
+      const sender = (m.role === 'user') ? 'user' : (m.role === 'assistant' ? 'bot' : (m.role || 'bot'));
+      return { sender, text: m.content || '', ts: m.ts || m.timestamp || null };
+    })
+  };
+  return out;
+}
+
 /* Routes */
+
+/**
+ * POST /user
+ */
 app.post('/user', async (req, res) => {
   try {
     const { name, tfid } = req.body || {};
@@ -286,9 +274,13 @@ app.post('/user', async (req, res) => {
   }
 });
 
+/**
+ * POST /session
+ * returns client-friendly session AND sessionId field for compatibility
+ */
 app.post('/session', async (req, res) => {
   try {
-    const { tfid } = req.body || {};
+    const { tfid, title } = req.body || {};
     if (!tfid) return res.status(400).json({ error: 'tfid_required' });
     const usersObj = await readJsonSafe(USERS_FILE, { users: [] });
     const found = (usersObj.users || []).find(u => u.tfid === tfid);
@@ -296,16 +288,39 @@ app.post('/session', async (req, res) => {
     const sessionsData = await readJsonSafe(SESSIONS_FILE, { sessions: {} });
     sessionsData.sessions = sessionsData.sessions || {};
     const sessionId = crypto.randomUUID();
-    const session = { sessionId, tfid, createdAt: new Date().toISOString(), messages: [] };
+    const session = { sessionId, tfid, title: title || 'Nouveau Chat', createdAt: new Date().toISOString(), messages: [] };
     sessionsData.sessions[sessionId] = session;
     await writeJsonSafe(SESSIONS_FILE, sessionsData);
-    return res.json({ sessionId, createdAt: session.createdAt });
+    // return the session in client-friendly shape AND include sessionId
+    const clientShape = formatSessionForClient(session);
+    return res.json({ sessionId, ...clientShape });
   } catch (err) {
     console.error('/session error', err);
     return res.status(500).json({ error: 'server_error', details: String(err?.message || err) });
   }
 });
 
+/**
+ * GET /sessions
+ */
+app.get('/sessions', async (req, res) => {
+  try {
+    const tfid = req.query.tfid;
+    const sessionsData = await readJsonSafe(SESSIONS_FILE, { sessions: {} });
+    const all = sessionsData.sessions || {};
+    const arr = Object.keys(all).map(k => all[k]);
+    const filtered = tfid ? arr.filter(s => s.tfid === tfid) : arr;
+    const out = filtered.map(formatSessionForClient);
+    return res.json(out);
+  } catch (err) {
+    console.error('/sessions error', err);
+    return res.status(500).json({ error: String(err?.message || err) });
+  }
+});
+
+/**
+ * GET /history/:tfid/:n?
+ */
 app.get('/history/:tfid/:n?', async (req, res) => {
   try {
     const tfid = req.params.tfid;
@@ -319,7 +334,10 @@ app.get('/history/:tfid/:n?', async (req, res) => {
   }
 });
 
-app.post('/message', async (req, res) => {
+/**
+ * Core handler logic extracted to a reusable function
+ */
+async function handleMessage(req, res) {
   try {
     const { tfid, sessionId } = req.body || {};
     let text = req.body?.text;
@@ -331,6 +349,7 @@ app.post('/message', async (req, res) => {
     const users = await readJsonSafe(USERS_FILE, { users: [] });
     const user = (users.users || []).find(u => u.tfid === tfid);
     if (!user) return res.status(404).json({ error: 'user_not_found' });
+
     const sessionsData = await readJsonSafe(SESSIONS_FILE, { sessions: {} });
     sessionsData.sessions = sessionsData.sessions || {};
     const session = sessionsData.sessions[sessionId];
@@ -339,15 +358,16 @@ app.post('/message', async (req, res) => {
 
     session.messages = session.messages || [];
     session.messages.push({ role: 'user', content: clean, ts: Date.now() });
+
     const hist = await readJsonSafe(USER_HISTORY_FILE, { histories: {} });
     hist.histories = hist.histories || {};
     hist.histories[tfid] = hist.histories[tfid] || [];
     hist.histories[tfid].push({ role: 'user', content: clean, sessionId, ts: Date.now() });
+
     await writeJsonSafe(SESSIONS_FILE, sessionsData);
     await writeJsonSafe(USER_HISTORY_FILE, hist);
 
     const systemMsg = makeSystemPrompt(tfid, sessionId, user.name || DEFAULT_USER_NAME);
-
     let tail = (session.messages || []).slice(-HISTORY_TAIL).map(m => ({ role: m.role, content: m.content || '' }));
 
     function estimatePromptTokens(systemObj, tailArr, finalUserContent) {
@@ -390,7 +410,7 @@ app.post('/message', async (req, res) => {
     let continuations = 0;
     let assistantText = null;
 
-    // backoff parameters
+    // backoff params
     let backoffMs = 1000;
     const BACKOFF_MULT = 2;
     const MAX_BACKOFF_MS = 16000;
@@ -482,58 +502,53 @@ app.post('/message', async (req, res) => {
       await writeJsonSafe(SESSIONS_FILE, sessionsData);
       await writeJsonSafe(USER_HISTORY_FILE, hist);
       const visible = extractVisibleFromWrapped(wrapped);
-      return res.json({ assistant: visible });
+      return res.json({ assistant: visible, session: formatSessionForClient(session) });
     }
 
-    // === BEGIN: remplacement du bloc d'erreur par logique de fallback historique (NEW) ===
     console.error('No assistant text extracted after retries/continuations.');
-
     if (lastResp) {
       console.error('Provider lastResp status:', lastResp.status);
       if (lastResp.fetchError) console.error('Provider fetchError:', lastResp.fetchError);
       if (lastResp.text && lastResp.text.trim()) {
-        // si le provider renvoie du texte brut, on le renvoie (comme avant)
         const statusToSend = Number.isInteger(lastResp.status) ? lastResp.status : 502;
         return res.status(statusToSend).type('text').send(lastResp.text);
       }
     }
 
-    // --- Nouvelle logique : fallback sur historique local ---
-    try {
-      const best = await findBestPastReply(clean);
-      if (best && best.assistantContent) {
-        console.log('Fallback: found best past reply with score', best.score.toFixed(3), 'from tfid', best.tfid);
-
-        // utiliser la réponse trouvée (on garde telle quelle si elle contient le marqueur, sinon on l'enveloppe)
-        const assistantRaw = String(best.assistantContent || '').trim();
-        const wrapped = ensureMarkerBefore(assistantRaw);
-
-        // enregistrer dans la session courante et dans user_history du tfid actuel
-        session.messages.push({ role: 'assistant', content: wrapped, ts: Date.now() });
-        hist.histories[tfid].push({ role: 'assistant', content: wrapped, sessionId, ts: Date.now(), fallback_from: best.tfid });
-
-        await writeJsonSafe(SESSIONS_FILE, sessionsData);
-        await writeJsonSafe(USER_HISTORY_FILE, hist);
-
-        const visible = extractVisibleFromWrapped(wrapped);
-        return res.json({ assistant: visible, fallback: true, fallbackScore: best.score });
-      } else {
-        console.warn('Fallback search found no suitable past reply.');
-        return res.status(502).json({ error: 'no_response_from_provider', fallback: false });
-      }
-    } catch (e) {
-      console.error('Error during fallback search:', e);
-      return res.status(502).json({ error: 'no_response_from_provider', fallback: false, details: String(e?.message || e) });
-    }
-    // === END: fallback historique ===
-
+    return res.status(502).json({ error: 'no_response_from_provider' });
   } catch (err) {
     console.error('/message error', err);
     return res.status(500).json({ error: 'server_error', details: String(err?.message || err) });
   }
+}
+
+/**
+ * POST /message (main)
+ */
+app.post('/message', handleMessage);
+
+/**
+ * POST /api/chat -> alias (compatibility)
+ * Accepts { prompt } or { text } and forwards
+ */
+app.post('/api/chat', async (req, res) => {
+  // Normalize older shape: prompt -> text
+  if (req.body && req.body.prompt && !req.body.text) req.body.text = req.body.prompt;
+  return handleMessage(req, res);
 });
 
 app.get('/health', (req, res) => res.json({ ok: true }));
+
+// Print routes (dev-friendly)
+if (app && app._router && app._router.stack) {
+  console.log('Exposed routes:');
+  app._router.stack.forEach(m => {
+    if (m.route && m.route.path) {
+      const methods = Object.keys(m.route.methods).join(',').toUpperCase();
+      console.log(methods, m.route.path);
+    }
+  });
+}
 
 app.listen(PORT, () => {
   console.log(`Server listening on http://localhost:${PORT} (HISTORY_TAIL=${HISTORY_TAIL}, RESPONSE_MAX_TOKENS=${DEFAULT_MAX_TOKENS})`);
