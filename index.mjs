@@ -20,7 +20,21 @@ const OPENROUTER_API_KEY = process.env.OPENROUTER_API_KEY;
 const OPENROUTER_ENDPOINT = process.env.OPENROUTER_ENDPOINT || 'https://openrouter.ai/api/v1/chat/completions';
 const OPENROUTER_MODEL = process.env.OPENROUTER_MODEL || 'gpt-5';
 
-const HISTORY_TAIL = Number(process.env.HISTORY_TAIL) || 7;
+const raw = process.env.HISTORY_TAIL;
+
+
+let HISTORY_TAIL = (raw !== undefined && raw !== '') ? Number(raw) : 7;
+
+
+if (!Number.isFinite(HISTORY_TAIL)) {
+  HISTORY_TAIL = 7;
+}
+
+// si itilizatè mete 0 oswa negatif => entèprete kòm "pran tout"
+if (HISTORY_TAIL <= 0) {
+  HISTORY_TAIL = Infinity;
+}
+
 const DEFAULT_MAX_TOKENS = Number(process.env.DEFAULT_MAX_TOKENS) || 1000;
 const MAX_ALLOWED_TOKENS = Number(process.env.MAX_ALLOWED_TOKENS) || 1000;
 const MAX_CONTEXT_TOKENS = Number(process.env.MAX_CONTEXT_TOKENS) || 2048;
@@ -44,7 +58,7 @@ if (!OPENROUTER_API_KEY) {
 }
 
 app.use(cors({ origin: true }));
-app.use(express.json({ limit: '70mb' }));
+app.use(express.json({ limit: '1000mb' }));
 app.use(express.urlencoded({ extended: false }));
 app.use(express.static(path.join(__dirname, 'public')));
 
@@ -208,8 +222,8 @@ await readJsonSafe(USER_HISTORY_FILE, { histories: {} });
 
 /* System prompt */
 function makeSystemPrompt(tfid, sessionId, userName = null) {
-  const identity = "You are Adam_D'H7 everyone's friend created by D'H7 | Tergene.";
-  const lines = [identity, `Session: ${sessionId}`, 'Réponds en français, naturellement.'];
+  const identity = "You are Adam_D'H7 everyone's friend created by D'H7 | Tergene. born on July 17, 2009, you are a Haitian ";
+  const lines = [identity, `Session: ${sessionId}`, 'responds to the user\'s language '];
   return { role: 'system', content: lines.join(' ') };
 }
 
