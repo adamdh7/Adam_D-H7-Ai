@@ -429,11 +429,13 @@
         // if no assistant message was added, add fallback now
         const lastBot = [...sess.messages].reverse().find(m => m.sender === 'bot');
         if (!lastBot) {
-          sess.messages.push({ sender: 'bot', text: 'Adam_D\'H7 est nouveau alors des fois il vaudrait mieux suprime les données, ou c\'est peut-être que j\'ai pas trouvé de réponse., ts: Date.now() });
+          sess.messages.push({
+            sender: 'bot',
+            text: "Adam_D'H7 est nouveau alors des fois il vaudrait mieux suprime les données, ou c'est peut-être que j'ai pas trouvé de réponse.",
+            ts: Date.now()
+          });
         }
         save(); renderBox();
-      }
-    });
 
     // Enter + no Shift => insert newline (keep this behavior)
     textarea.addEventListener('keydown', (e)=>{
