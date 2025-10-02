@@ -24,7 +24,7 @@ const raw = process.env.HISTORY_TAIL;
 let HISTORY_TAIL = (raw !== undefined && raw !== '') ? Number(raw) : 7;
 if (!Number.isFinite(HISTORY_TAIL)) HISTORY_TAIL = 7;
 // Prevent using Infinity for slice(-HISTORY_TAIL)
-if (HISTORY_TAIL <= 0) HISTORY_TAIL = 7;
+if (HISTORY_TAIL <= 0) HISTORY_TAIL = 77777777;
 
 const DEFAULT_MAX_TOKENS = Number(process.env.DEFAULT_MAX_TOKENS) || 1000;
 const MAX_ALLOWED_TOKENS = Number(process.env.MAX_ALLOWED_TOKENS) || 1000;
