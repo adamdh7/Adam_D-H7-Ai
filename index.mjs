@@ -22,9 +22,7 @@ const OPENROUTER_MODEL = process.env.OPENROUTER_MODEL || 'gpt-5';
 
 const raw = process.env.HISTORY_TAIL;
 
-
 let HISTORY_TAIL = (raw !== undefined && raw !== '') ? Number(raw) : 7;
-
 
 if (!Number.isFinite(HISTORY_TAIL)) {
   HISTORY_TAIL = 7;
@@ -128,66 +126,101 @@ function estimateTokensFromMessagesArray(arr) {
   return total;
 }
 
-/* Robust extractor */
-function findFirstStringInObject(obj) {
-  if (obj == null) return null;
-  if (typeof obj === 'string' && obj.trim()) return obj.trim();
-  if (Array.isArray(obj)) {
-    for (const it of obj) {
-      const s = findFirstStringInObject(it);
-      if (s) return s;
-    }
-    return null;
-  }
-  if (typeof obj === 'object') {
-    const tryKeys = ['content', 'text', 'message', 'output_text', 'response', 'result', 'parts'];
-    for (const k of tryKeys) {
-      if (obj[k] !== undefined) {
-        const s = findFirstStringInObject(obj[k]);
-        if (s) return s;
-      }
-    }
-    for (const k of Object.keys(obj)) {
-      const s = findFirstStringInObject(obj[k]);
-      if (s) return s;
-    }
-  }
-  return null;
+/* ---------- Similarité / fallback search helpers (NEW) ---------- */
+
+function tokenizeWords(s) {
+  if (!s) return [];
+  return String(s).toLowerCase()
+    .normalize('NFKD')
+    .replace(/[\u0300-\u036f]/g, '') // remove diacritics
+    .split(/\s+/)
+    .map(w => w.replace(/[^\p{L}\p{N}]/gu, ''))
+    .filter(Boolean);
 }
-function extractAssistantText(payloadJson) {
-  if (!payloadJson) return null;
-  try {
-    if (Array.isArray(payloadJson.choices) && payloadJson.choices.length) {
-      const c = payloadJson.choices[0];
-      const mc = c?.message?.content;
-      if (typeof mc === 'string' && mc.trim()) return mc.trim();
-      const fromMc = findFirstStringInObject(mc);
-      if (fromMc) return fromMc;
-      if (typeof c.text === 'string' && c.text.trim()) return c.text.trim();
-      if (c?.delta) {
-        const d = c.delta.content ?? c.delta;
-        const s = findFirstStringInObject(d);
-        if (s) return s;
+
+// Dice coefficient (word-level)
+function diceCoefficientWords(a, b) {
+  const A = tokenizeWords(a);
+  const B = tokenizeWords(b);
+  if (!A.length && !B.length) return 0;
+  const setA = new Set(A);
+  const setB = new Set(B);
+  let inter = 0;
+  for (const t of setA) if (setB.has(t)) inter++;
+  return (2 * inter) / (setA.size + setB.size) || 0;
+}
+
+// Longest common substring length (char-level) — normalized
+function longestCommonSubstringLen(a, b) {
+  if (!a || !b) return 0;
+  const A = String(a);
+  const B = String(b);
+  const m = A.length, n = B.length;
+  let max = 0;
+  const dp = new Uint16Array(n + 1);
+  for (let i = 1; i <= m; i++) {
+    let prev = 0;
+    for (let j = 1; j <= n; j++) {
+      const tmp = dp[j];
+      if (A[i - 1] === B[j - 1]) {
+        dp[j] = prev + 1;
+        if (dp[j] > max) max = dp[j];
+      } else {
+        dp[j] = 0;
       }
-      if (Array.isArray(c?.message?.reasoning_details)) {
-        for (const it of c.message.reasoning_details) {
-          if (!it) continue;
-          if (it.type && String(it.type).toLowerCase().includes('encrypted')) continue;
-          if (typeof it.summary === 'string' && it.summary.trim()) return it.summary.trim();
-          const fromIt = findFirstStringInObject(it);
-          if (fromIt) return fromIt;
+      prev = tmp;
+    }
+  }
+  return max;
+}
+
+function combinedSimilarity(a, b) {
+  const dice = diceCoefficientWords(a, b);
+  const lcs = longestCommonSubstringLen(a, b);
+  const avgLen = (String(a).length + String(b).length) / 2 || 1;
+  const lcsNorm = lcs / avgLen; // between 0..1
+  // combine both signals, give word overlap more weight
+  return Math.max(dice, (dice * 0.7 + lcsNorm * 0.3));
+}
+
+/**
+ * Recherche la meilleure réponse passée (dans user_history.json) correspondant à `query`.
+ * Renvoie { score, userContent, assistantContent, tfid, sessionId } ou null si rien.
+ */
+async function findBestPastReply(query) {
+  const all = await readJsonSafe(USER_HISTORY_FILE, { histories: {} });
+  let best = null;
+  const histories = all.histories || {};
+  for (const [histTfid, arr] of Object.entries(histories)) {
+    if (!Array.isArray(arr)) continue;
+    for (let i = 0; i < arr.length; i++) {
+      const rec = arr[i];
+      if (!rec || rec.role !== 'user' || !rec.content) continue;
+      const score = combinedSimilarity(query, rec.content);
+      // chercher la prochaine réponse assistant dans le même sessionId après i
+      for (let j = i + 1; j < arr.length; j++) {
+        const next = arr[j];
+        if (!next) continue;
+        // si sessionId diffère, on arrête de chercher plus loin pour cet indice
+        if (rec.sessionId && next.sessionId && rec.sessionId !== next.sessionId) break;
+        if (next.role === 'assistant' && next.content) {
+          if (!best || score > best.score) {
+            best = {
+              score,
+              userContent: rec.content,
+              assistantContent: next.content,
+              tfid: histTfid,
+              sessionId: rec.sessionId || null,
+              idxUser: i,
+              idxAssistant: j
+            };
+          }
+          break; // on garde uniquement la réponse immédiate suivante
         }
       }
     }
-    for (const k of ['response','output','result','text','output_text']) {
-      if (typeof payloadJson[k] === 'string' && payloadJson[k].trim()) return payloadJson[k].trim();
-      const candidate = findFirstStringInObject(payloadJson[k]);
-      if (candidate) return candidate;
-    }
-  } catch (e) {
-    console.error('extractAssistantText error', e);
   }
-  return null;
+  return best;
 }
 
 /* sleep helper */
@@ -452,17 +485,47 @@ app.post('/message', async (req, res) => {
       return res.json({ assistant: visible });
     }
 
+    // === BEGIN: remplacement du bloc d'erreur par logique de fallback historique (NEW) ===
     console.error('No assistant text extracted after retries/continuations.');
+
     if (lastResp) {
       console.error('Provider lastResp status:', lastResp.status);
       if (lastResp.fetchError) console.error('Provider fetchError:', lastResp.fetchError);
       if (lastResp.text && lastResp.text.trim()) {
+        // si le provider renvoie du texte brut, on le renvoie (comme avant)
         const statusToSend = Number.isInteger(lastResp.status) ? lastResp.status : 502;
         return res.status(statusToSend).type('text').send(lastResp.text);
       }
     }
 
-    return res.status(502).json({ error: 'no_response_from_provider' });
+    // --- Nouvelle logique : fallback sur historique local ---
+    try {
+      const best = await findBestPastReply(clean);
+      if (best && best.assistantContent) {
+        console.log('Fallback: found best past reply with score', best.score.toFixed(3), 'from tfid', best.tfid);
+
+        // utiliser la réponse trouvée (on garde telle quelle si elle contient le marqueur, sinon on l'enveloppe)
+        const assistantRaw = String(best.assistantContent || '').trim();
+        const wrapped = ensureMarkerBefore(assistantRaw);
+
+        // enregistrer dans la session courante et dans user_history du tfid actuel
+        session.messages.push({ role: 'assistant', content: wrapped, ts: Date.now() });
+        hist.histories[tfid].push({ role: 'assistant', content: wrapped, sessionId, ts: Date.now(), fallback_from: best.tfid });
+
+        await writeJsonSafe(SESSIONS_FILE, sessionsData);
+        await writeJsonSafe(USER_HISTORY_FILE, hist);
+
+        const visible = extractVisibleFromWrapped(wrapped);
+        return res.json({ assistant: visible, fallback: true, fallbackScore: best.score });
+      } else {
+        console.warn('Fallback search found no suitable past reply.');
+        return res.status(502).json({ error: 'no_response_from_provider', fallback: false });
+      }
+    } catch (e) {
+      console.error('Error during fallback search:', e);
+      return res.status(502).json({ error: 'no_response_from_provider', fallback: false, details: String(e?.message || e) });
+    }
+    // === END: fallback historique ===
 
   } catch (err) {
     console.error('/message error', err);
