@@ -5,7 +5,7 @@
   <!-- Prevent zooming on mobile -->
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no"/>
   <title>Adam_D'H7</title>
-    <!-- PWA manifest et icônes -->
+  <!-- PWA manifest et icônes -->
   <link rel="manifest" href="manifest.json" />
   <link rel="icon" type="image/jpeg" href="https://res.cloudinary.com/dglludnfq/image/upload/v1759278052/tf-stream-url/Screenshot_20250930_202003_Gallery.jpg" />
   <link rel="apple-touch-icon" href="https://res.cloudinary.com/dglludnfq/image/upload/v1759278052/tf-stream-url/Screenshot_20250930_202003_Gallery.jpg" />
@@ -177,6 +177,7 @@
     const chatBox = document.getElementById('chatBox');
     const formEl = document.querySelector('form');
     const textarea = document.getElementById('userInput');
+    const chatForm = document.getElementById('chatForm');
 
     function scrollToBottom(immediate = true) {
       try {
@@ -214,7 +215,7 @@
     // Session & UI state (local)
     // -------------------------
     if(!document.getElementById('headerName').textContent.trim()) document.getElementById('headerName').textContent = "Adam_D'H7";
-    if (Notification && Notification.permission !== 'granted') Notification.requestPermission();
+    if (typeof Notification !== 'undefined' && Notification && Notification.permission !== 'granted') Notification.requestPermission();
 
     const STORAGE_KEY = 'tfai_sessions';
     let sessions = JSON.parse(localStorage.getItem(STORAGE_KEY) || '[]');
@@ -283,7 +284,6 @@
     // -------------------------
     // Paste => immediate send (no maxlength)
     // -------------------------
-    const chatForm = document.getElementById('chatForm');
     textarea.addEventListener('paste', (e)=>{
       // allow default paste then submit shortly after so textarea is populated
       setTimeout(()=> {
@@ -343,7 +343,7 @@
     // -------------------------
     // Submit flow: ALWAYS produce a bot reply (network fallback handled)
     // -------------------------
-    chatForm.addEventListener('submit', async (e)=>{
+    chatForm.addEventListener('submit', async (e) => {
       e.preventDefault();
       const raw = textarea.value;
       const text = (typeof raw === 'string') ? raw.trim() : '';
@@ -415,7 +415,9 @@
         assistantPushed = true;
         save(); renderBox();
 
-        if (document.hidden && Notification.permission === 'granted') new Notification('Adam_D\'H7', { body: 'Nouvo mesaj TF-Chat' });
+        if (typeof document !== 'undefined' && document.hidden && typeof Notification !== 'undefined' && Notification.permission === 'granted') {
+          new Notification("Adam_D'H7", { body: 'Nouvo mesaj TF-Chat' });
+        }
 
       } catch (err) {
         console.warn('Error sending message or parsing response, will fallback. Err:', err && err.message ? err.message : err);
@@ -436,6 +438,8 @@
           });
         }
         save(); renderBox();
+      } // end try/catch/finally
+    }); // end submit handler
 
     // Enter + no Shift => insert newline (keep this behavior)
     textarea.addEventListener('keydown', (e)=>{
@@ -448,23 +452,24 @@
     });
 
     // On load: render saved sessions
-    if (sessions.length) renderList(), renderBox();
+    if (sessions.length) { renderList(); renderBox(); }
     adjustLayoutForViewport();
-      window.addEventListener('load', () => {
-    if ('serviceWorker' in navigator) {
-      navigator.serviceWorker.register('/sw.js', { scope: '/' })
-        .then(reg => {
-          navigator.serviceWorker.ready.then(regReady => {
-            if (regReady.active && regReady.active.postMessage) {
-              regReady.active.postMessage({ type: 'LIST_CACHES' });
-            }
-          });
-        })
-        .catch(()=>{/* silent */});
 
-      navigator.serviceWorker.addEventListener('message', ()=>{/* silent */});
-    }
-  });
+    window.addEventListener('load', () => {
+      if ('serviceWorker' in navigator) {
+        navigator.serviceWorker.register('/sw.js', { scope: '/' })
+          .then(reg => {
+            navigator.serviceWorker.ready.then(regReady => {
+              if (regReady.active && regReady.active.postMessage) {
+                regReady.active.postMessage({ type: 'LIST_CACHES' });
+              }
+            });
+          })
+          .catch(()=>{/* silent */});
+
+        navigator.serviceWorker.addEventListener('message', ()=>{/* silent */});
+      }
+    });
   </script>
-</body>
-  </html>
+ </body>
+</html>
