@@ -1,4 +1,3 @@
-// index.mjs
 import express from 'express';
 import cors from 'cors';
 import path from 'path';
@@ -16,18 +15,25 @@ const app = express();
 
 /* Config */
 const PORT = Number(process.env.PORT) || 3000;
-const OPENROUTER_API_KEY = process.env.OPENROUTER_API_KEY;
-const OPENROUTER_ENDPOINT = process.env.OPENROUTER_ENDPOINT || 'https://openrouter.ai/api/v1/chat/completions';
-const OPENROUTER_MODEL = process.env.OPENROUTER_MODEL || 'gpt-5';
 
+/* Google-only config */
+const GOOGLE_API_KEY = process.env.GOOGLE_API_KEY || '';
+const GOOGLE_BASE = process.env.GOOGLE_BASE || 'https://generativelanguage.googleapis.com';
+const GOOGLE_MODEL = process.env.GOOGLE_MODEL || 'gemini-2.0-flash';
+
+if (!GOOGLE_API_KEY) {
+  console.error('ERROR: GOOGLE_API_KEY missing in .env — set GOOGLE_API_KEY and restart.');
+  process.exit(1);
+}
+
+/* Other config */
 const raw = process.env.HISTORY_TAIL;
-let HISTORY_TAIL = (raw !== undefined && raw !== '') ? Number(raw) : 17;
-if (!Number.isFinite(HISTORY_TAIL)) HISTORY_TAIL = 17;
-// Prevent using Infinity for slice(-HISTORY_TAIL)
-if (HISTORY_TAIL <= 0) HISTORY_TAIL = 17;
+let HISTORY_TAIL = (raw !== undefined && raw !== '') ? Number(raw) : 777;
+if (!Number.isFinite(HISTORY_TAIL)) HISTORY_TAIL = 777;
+if (HISTORY_TAIL <= 0) HISTORY_TAIL = 777;
 
-const DEFAULT_MAX_TOKENS = Number(process.env.DEFAULT_MAX_TOKENS) || 500;
-const MAX_ALLOWED_TOKENS = Number(process.env.MAX_ALLOWED_TOKENS) || 500;
+const DEFAULT_MAX_TOKENS = Number(process.env.DEFAULT_MAX_TOKENS) || 10000;
+const MAX_ALLOWED_TOKENS = Number(process.env.MAX_ALLOWED_TOKENS) || 10000;
 const MAX_CONTEXT_TOKENS = Number(process.env.MAX_CONTEXT_TOKENS) || 2048;
 const DEFAULT_TIMEOUT_MS = Number(process.env.DEFAULT_TIMEOUT_MS) || 120000;
 const MAX_RETRIES = Number(process.env.MAX_RETRIES) || 5;
@@ -40,24 +46,16 @@ const USERS_FILE = path.join(__dirname, 'user.json');
 const SESSIONS_FILE = path.join(__dirname, 'sessions.json');
 const USER_HISTORY_FILE = path.join(__dirname, 'user_history.json');
 
-if (!OPENROUTER_API_KEY) {
-  console.error('ERROR: OPENROUTER_API_KEY missing in .env — set OPENROUTER_API_KEY and restart.');
-  process.exit(1);
-}
-
-/* Middlewares */
 app.use(cors({ origin: true }));
 app.use(express.json({ limit: '1000mb' }));
 app.use(express.urlencoded({ extended: false }));
 app.use(express.static(path.join(__dirname, 'public')));
 
-// Simple request logger (dev)
 app.use((req, res, next) => {
-  console.log(`[${new Date().toISOString()}] ${req.method} ${req.originalUrl} body:`, req.body || {});
+  console.log(`[${new Date().toISOString()}] ${req.method} ${req.originalUrl} body:`, req.body ? (Object.keys(req.body).length ? '<body>' : '{}') : {});
   next();
 });
 
-/* JSON helpers */
 async function readJsonSafe(filePath, defaultValue) {
   try {
     const raw = await fs.readFile(filePath, 'utf8');
@@ -77,7 +75,6 @@ async function writeJsonSafe(filePath, obj) {
   await fs.rename(tmp, filePath);
 }
 
-/* TFID */
 function generateTFIDRaw(len = 7) {
   const bytes = crypto.randomBytes(len);
   let id = '';
@@ -98,15 +95,15 @@ async function ensureUniqueTFID() {
 const MARKER = '***Terminé***';
 function ensureMarkerBefore(text) {
   const t = text == null ? '' : String(text).trim();
-  if (!t) return MARKER;
+  if (!t) return '';
   if (t.includes(MARKER)) return t;
-  return `${MARKER}\n\n${t}`;
+  return `${t}\n\n${MARKER}`;
 }
 function extractVisibleFromWrapped(wrapped) {
   if (!wrapped || typeof wrapped !== 'string') return '';
   const idx = wrapped.lastIndexOf(MARKER);
   if (idx === -1) return wrapped.trim();
-  return wrapped.slice(idx + MARKER.length).trim();
+  return wrapped.slice(0, idx).trim();
 }
 
 /* Token/char estimation */
@@ -135,7 +132,7 @@ function findFirstStringInObject(obj) {
     return null;
   }
   if (typeof obj === 'object') {
-    const tryKeys = ['content', 'text', 'message', 'output_text', 'response', 'result', 'parts'];
+    const tryKeys = ['content', 'text', 'message', 'output_text', 'response', 'result', 'parts', 'candidates', 'output'];
     for (const k of tryKeys) {
       if (obj[k] !== undefined) {
         const s = findFirstStringInObject(obj[k]);
@@ -152,29 +149,13 @@ function findFirstStringInObject(obj) {
 function extractAssistantText(payloadJson) {
   if (!payloadJson) return null;
   try {
-    if (Array.isArray(payloadJson.choices) && payloadJson.choices.length) {
-      const c = payloadJson.choices[0];
-      const mc = c?.message?.content;
-      if (typeof mc === 'string' && mc.trim()) return mc.trim();
-      const fromMc = findFirstStringInObject(mc);
-      if (fromMc) return fromMc;
-      if (typeof c.text === 'string' && c.text.trim()) return c.text.trim();
-      if (c?.delta) {
-        const d = c.delta.content ?? c.delta;
-        const s = findFirstStringInObject(d);
-        if (s) return s;
-      }
-      if (Array.isArray(c?.message?.reasoning_details)) {
-        for (const it of c.message.reasoning_details) {
-          if (!it) continue;
-          if (it.type && String(it.type).toLowerCase().includes('encrypted')) continue;
-          if (typeof it.summary === 'string' && it.summary.trim()) return it.summary.trim();
-          const fromIt = findFirstStringInObject(it);
-          if (fromIt) return fromIt;
-        }
-      }
+    if (Array.isArray(payloadJson.candidates) && payloadJson.candidates.length) {
+      const cand = payloadJson.candidates[0];
+      const txt = findFirstStringInObject(cand);
+      if (txt) return txt;
     }
-    for (const k of ['response','output','result','text','output_text']) {
+    // fallback: top-level fields
+    for (const k of ['response','output','result','text','output_text','candidates']) {
       if (typeof payloadJson[k] === 'string' && payloadJson[k].trim()) return payloadJson[k].trim();
       const candidate = findFirstStringInObject(payloadJson[k]);
       if (candidate) return candidate;
@@ -185,12 +166,10 @@ function extractAssistantText(payloadJson) {
   return null;
 }
 
-/* sleep helper */
 function sleep(ms) {
   return new Promise(resolve => setTimeout(resolve, ms));
 }
 
-/* fetchWithTimeout (robust) */
 async function fetchWithTimeout(url, options = {}, timeoutMs = DEFAULT_TIMEOUT_MS) {
   const controller = new AbortController();
   const id = setTimeout(() => {
@@ -222,8 +201,8 @@ function makeSystemPrompt(tfid, sessionId, userName = null) {
     'Respond in the same language the user used.',
     'When you include content the user may want to copy exactly (code, commands, snippets, or any text to copy), surround that exact content with triple backticks, for example: ```this is copyable```',
     'Do NOT place commentary inside the triple backticks — only the exact content to copy should be between the backticks.',
-    `At the end of your full reply, include a single line with exactly ${MARKER} (three asterisks + Terminé + three asterisks), and after that line provide a concise final visible response for the user. The server will display the portion after ${MARKER}. If you already include ${MARKER}, do not duplicate it.`,
-    'Keep the reply concise and avoid revealing internal chain-of-thought or reasoning steps. If asked for code or copyable outputs, prefer triple-backtick blocks as explained above.'
+    `At the end of your full reply, include a single line with exactly ${MARKER}. Anything after that line will be hidden by the server; the server will display only the text before ${MARKER}. If you already include ${MARKER}, do not duplicate it.`,
+    'Do not reveal internal chain-of-thought or reasoning steps.'
   ];
   const lines = [identity, `Session: ${sessionId}`, ...instructions];
   return { role: 'system', content: lines.join(' ') };
@@ -244,11 +223,7 @@ function formatSessionForClient(sessionObj) {
   return out;
 }
 
-/* Routes */
-
-/**
- * POST /user
- */
+/* Routes (same as original) */
 app.post('/user', async (req, res) => {
   try {
     const { name, tfid } = req.body || {};
@@ -274,10 +249,6 @@ app.post('/user', async (req, res) => {
   }
 });
 
-/**
- * POST /session
- * returns client-friendly session AND sessionId field for compatibility
- */
 app.post('/session', async (req, res) => {
   try {
     const { tfid, title } = req.body || {};
@@ -291,7 +262,6 @@ app.post('/session', async (req, res) => {
     const session = { sessionId, tfid, title: title || 'Nouveau Chat', createdAt: new Date().toISOString(), messages: [] };
     sessionsData.sessions[sessionId] = session;
     await writeJsonSafe(SESSIONS_FILE, sessionsData);
-    // return the session in client-friendly shape AND include sessionId
     const clientShape = formatSessionForClient(session);
     return res.json({ sessionId, ...clientShape });
   } catch (err) {
@@ -300,9 +270,6 @@ app.post('/session', async (req, res) => {
   }
 });
 
-/**
- * GET /sessions
- */
 app.get('/sessions', async (req, res) => {
   try {
     const tfid = req.query.tfid;
@@ -318,9 +285,6 @@ app.get('/sessions', async (req, res) => {
   }
 });
 
-/**
- * GET /history/:tfid/:n?
- */
 app.get('/history/:tfid/:n?', async (req, res) => {
   try {
     const tfid = req.params.tfid;
@@ -334,9 +298,7 @@ app.get('/history/:tfid/:n?', async (req, res) => {
   }
 });
 
-/**
- * Core handler logic extracted to a reusable function
- */
+/* Core handler using Google generateContent */
 async function handleMessage(req, res) {
   try {
     const { tfid, sessionId } = req.body || {};
@@ -419,19 +381,35 @@ async function handleMessage(req, res) {
     while (attempt < MAX_RETRIES) {
       attempt++;
       const attemptTimeout = DEFAULT_TIMEOUT_MS + (attempt - 1) * EXTRA_TIMEOUT_PER_ATTEMPT;
+
+      // Build Google generateContent payload
+      const promptText = messagesForProvider.map(m => `${m.role || 'user'}: ${String(m.content || '')}`).join('\n\n');
+
+      const url = `${GOOGLE_BASE}/v1beta/models/${GOOGLE_MODEL}:generateContent?key=${GOOGLE_API_KEY}`;
+
       const payload = {
-        model: OPENROUTER_MODEL,
-        messages: messagesForProvider,
-        max_tokens: currentMax,
-        max_output_tokens: currentMax,
-        temperature: 0.2
+        system_instruction: {
+          parts: [
+            { text: systemMsg.content }
+          ]
+        },
+        contents: [
+          {
+            parts: [
+              { text: promptText }
+            ]
+          }
+        ],
+        generationConfig: {
+          maxOutputTokens: currentMax,
+          temperature: 0.7
+        }
       };
 
-      lastResp = await fetchWithTimeout(OPENROUTER_ENDPOINT, {
+      lastResp = await fetchWithTimeout(url, {
         method: 'POST',
         headers: {
-          'Content-Type': 'application/json',
-          'Authorization': 'Bearer ' + OPENROUTER_API_KEY
+          'Content-Type': 'application/json'
         },
         body: JSON.stringify(payload)
       }, attemptTimeout);
@@ -449,6 +427,7 @@ async function handleMessage(req, res) {
 
       if (!lastResp.ok) {
         console.warn(`Provider returned status ${lastResp.status} (attempt ${attempt}).`);
+        // If 502/503/504, retry
         if ([502, 503, 504].includes(lastResp.status) && attempt < MAX_RETRIES) {
           await sleep(backoffMs);
           backoffMs = Math.min(MAX_BACKOFF_MS, Math.floor(backoffMs * BACKOFF_MULT));
@@ -460,15 +439,19 @@ async function handleMessage(req, res) {
       const part = extractAssistantText(lastResp.json) || (lastResp.text && lastResp.text.trim()) || null;
       if (part) accumulated = accumulated ? (accumulated + '\n' + part) : part;
 
-      const maybeChoice = lastResp.json?.choices?.[0];
-      const finishReason = maybeChoice?.finish_reason || maybeChoice?.native_finish_reason || null;
+      const finishReason = lastResp.json?.candidates?.[0]?.finishReason ?? null;
 
-      if (finishReason !== 'length' && finishReason !== 'max_output_tokens') {
+      if (finishReason && finishReason !== 'LENGTH_EXCEEDED' && finishReason !== 'MAX_OUTPUT_TOKENS') {
         assistantText = accumulated || null;
         break;
       }
 
-      console.warn(`Model truncated (finish_reason=${finishReason}) on attempt ${attempt}.`);
+      if (!finishReason) {
+        assistantText = accumulated || null;
+        break;
+      }
+
+      console.warn(`Model truncated (finishReason=${finishReason}) on attempt ${attempt}.`);
 
       const prev = currentMax;
       currentMax = Math.min(MAX_ALLOWED_TOKENS, Math.max(currentMax + 32, Math.floor(currentMax * 1.5)));
@@ -522,24 +505,15 @@ async function handleMessage(req, res) {
   }
 }
 
-/**
- * POST /message (main)
- */
 app.post('/message', handleMessage);
 
-/**
- * POST /api/chat -> alias (compatibility)
- * Accepts { prompt } or { text } and forwards
- */
 app.post('/api/chat', async (req, res) => {
-  // Normalize older shape: prompt -> text
   if (req.body && req.body.prompt && !req.body.text) req.body.text = req.body.prompt;
   return handleMessage(req, res);
 });
 
 app.get('/health', (req, res) => res.json({ ok: true }));
 
-// Print routes (dev-friendly)
 if (app && app._router && app._router.stack) {
   console.log('Exposed routes:');
   app._router.stack.forEach(m => {
