@@ -21,13 +21,13 @@ const OPENROUTER_ENDPOINT = process.env.OPENROUTER_ENDPOINT || 'https://openrout
 const OPENROUTER_MODEL = process.env.OPENROUTER_MODEL || 'gpt-5';
 
 const raw = process.env.HISTORY_TAIL;
-let HISTORY_TAIL = (raw !== undefined && raw !== '') ? Number(raw) : 77;
-if (!Number.isFinite(HISTORY_TAIL)) HISTORY_TAIL = 77;
+let HISTORY_TAIL = (raw !== undefined && raw !== '') ? Number(raw) : 17;
+if (!Number.isFinite(HISTORY_TAIL)) HISTORY_TAIL = 17;
 // Prevent using Infinity for slice(-HISTORY_TAIL)
-if (HISTORY_TAIL <= 0) HISTORY_TAIL = 77;
+if (HISTORY_TAIL <= 0) HISTORY_TAIL = 17;
 
-const DEFAULT_MAX_TOKENS = Number(process.env.DEFAULT_MAX_TOKENS) || 1000;
-const MAX_ALLOWED_TOKENS = Number(process.env.MAX_ALLOWED_TOKENS) || 1000;
+const DEFAULT_MAX_TOKENS = Number(process.env.DEFAULT_MAX_TOKENS) || 500;
+const MAX_ALLOWED_TOKENS = Number(process.env.MAX_ALLOWED_TOKENS) || 500;
 const MAX_CONTEXT_TOKENS = Number(process.env.MAX_CONTEXT_TOKENS) || 2048;
 const DEFAULT_TIMEOUT_MS = Number(process.env.DEFAULT_TIMEOUT_MS) || 120000;
 const MAX_RETRIES = Number(process.env.MAX_RETRIES) || 5;
