@@ -117,6 +117,12 @@ async function readJsonSafe(filePath, defaultValue) {
       try { await fs.writeFile(filePath, JSON.stringify(defaultValue, null, 2), 'utf8'); } catch (e) {}
       return defaultValue;
     }
+    // If file exists but invalid JSON, rename to .broken and return default
+    if (err && (err.name === 'SyntaxError' || /Unexpected token/.test(String(err)))) {
+      try { await fs.rename(filePath, filePath + '.broken.' + Date.now()); } catch (e) {}
+      try { await fs.writeFile(filePath, JSON.stringify(defaultValue, null, 2), 'utf8'); } catch (e) {}
+      return defaultValue;
+    }
     throw err;
   }
 }
@@ -298,6 +304,19 @@ function formatSessionForClient(sessionObj) {
   return out;
 }
 
+/* Ensure session exists helper (used for auto-recreate when storage reset) */
+async function ensureSessionExists(sessionsData, sessionId, tfid, title = 'Recovered Chat') {
+  sessionsData.sessions = sessionsData.sessions || {};
+  let session = sessionsData.sessions[sessionId];
+  if (!session) {
+    session = { sessionId, tfid, title: title || 'Nouveau Chat', createdAt: new Date().toISOString(), messages: [] };
+    sessionsData.sessions[sessionId] = session;
+    try { await writeJsonSafe(SESSIONS_FILE, sessionsData); } catch (e) { logger.error(null, tfid, sessionId, `Failed to persist recreated session: ${String(e)}`); }
+    logger.warn(null, tfid, sessionId, `Session ${sessionId} not found; created recovered session for tfid=${tfid}`);
+  }
+  return session;
+}
+
 /* Routes */
 app.post('/user', async (req, res) => {
   try {
@@ -345,6 +364,21 @@ app.post('/session', async (req, res) => {
   }
 });
 
+// Get single session (client can check if exists)
+app.get('/session/:sessionId', async (req, res) => {
+  try {
+    const sessionId = req.params.sessionId;
+    if (!sessionId) return res.status(400).json({ error: 'sessionId_required' });
+    const sessionsData = await readJsonSafe(SESSIONS_FILE, { sessions: {} });
+    const session = sessionsData.sessions && sessionsData.sessions[sessionId];
+    if (session) return res.json(formatSessionForClient(session));
+    return res.status(404).json({ error: 'session_not_found' });
+  } catch (err) {
+    logger.error(req.requestId, null, null, `/session/:id error: ${String(err)}`);
+    return res.status(500).json({ error: 'server_error', details: String(err?.message || err) });
+  }
+});
+
 app.get('/sessions', async (req, res) => {
   try {
     const tfid = req.query.tfid;
@@ -369,7 +403,7 @@ app.get('/history/:tfid/:n?', async (req, res) => {
     return res.json(arr.slice(-n));
   } catch (err) {
     logger.error(req.requestId, null, null, `/history error: ${String(err)}`);
-    return res.status(500).json({ error: String(err?.message || err) });
+    return res.status(500).json({ error: String(err) });
   }
 });
 
@@ -389,8 +423,15 @@ async function handleMessage(req, res) {
 
     const sessionsData = await readJsonSafe(SESSIONS_FILE, { sessions: {} });
     sessionsData.sessions = sessionsData.sessions || {};
-    const session = sessionsData.sessions[sessionId];
-    if (!session) return res.status(404).json({ error: 'session_not_found' });
+    // If session is missing (e.g., Render restarted and cleared tmp storage), create it automatically
+    let session = sessionsData.sessions[sessionId];
+    if (!session) {
+      logger.warn(req.requestId, tfid, sessionId, `Session not found in storage — creating recovered session.`);
+      session = { sessionId, tfid, title: 'Recovered Chat', createdAt: new Date().toISOString(), messages: [] };
+      sessionsData.sessions[sessionId] = session;
+      try { await writeJsonSafe(SESSIONS_FILE, sessionsData); } catch (e) { logger.error(req.requestId, tfid, sessionId, `Failed to persist recreated session: ${String(e)}`); }
+    }
+
     if (session.tfid !== tfid) return res.status(403).json({ error: 'session_belongs_to_other_user' });
 
     session.messages = session.messages || [];
