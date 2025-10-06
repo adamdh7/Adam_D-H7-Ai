@@ -504,17 +504,39 @@ async function handleMessage(req, res) {
     }
 
     if (assistantText) {
+      // Wrap with server marker if not present
       const wrapped = ensureMarkerBefore(assistantText);
+
+      // store wrapped in session/history (raw from model)
       session.messages.push({ role: 'assistant', content: wrapped, ts: Date.now() });
       hist.histories[tfid].push({ role: 'assistant', content: wrapped, sessionId, ts: Date.now() });
       await writeJsonSafe(SESSIONS_FILE, sessionsData);
       await writeJsonSafe(USER_HISTORY_FILE, hist);
-      const visible = extractVisibleFromWrapped(wrapped);
 
-      // Transform §...§ into ```...``` blocks for client-friendly copy — normalize spaces inside markers first
-      const rendered = renderCopyableMarkersToMarkdown(visible);
+      // Visible part (before marker)
+      let visible = extractVisibleFromWrapped(wrapped);
 
-      return res.json({ assistant: rendered, session: formatSessionForClient(session) });
+      // 1) Normalize any accidental spaces inside § markers: § code § -> §code§
+      let normalized = normalizeCopyMarkers(visible);
+
+      // 2) If model used triple-backticks ```...``` convert them to §...§ to enforce § usage
+      normalized = normalized.replace(/```(?:[a-zA-Z0-9]+\n)?([\s\S]*?)```/g, (m, p1) => {
+        const inner = String(p1).replace(/^\n+|\n+$/g, '');
+        return '§' + inner + '§';
+      });
+
+      // 3) Also convert fenced HTML-style or other edge cases (just in case)
+      //    (no-op if none found)
+
+      // 4) Prepare a rendered version (```...```) if UI wants to show it
+      const rendered = renderCopyableMarkersToMarkdown(normalized);
+
+      // Return RAW with § as primary field, plus optional rendered.
+      return res.json({
+        assistant: normalized,            // raw text with §...§ blocks for copy
+        assistant_rendered: rendered,     // client-friendly ```...``` blocks (optional)
+        session: formatSessionForClient(session)
+      });
     }
 
     console.error('No assistant text extracted after retries/continuations.');
