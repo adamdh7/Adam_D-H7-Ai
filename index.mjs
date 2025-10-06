@@ -282,10 +282,10 @@ function renderCopyableMarkersToMarkdown(text) {
 
 /* System prompt builder */
 function makeSystemPrompt(tfid, sessionId, userName = null) {
-  const identity = "You are Adam_D'H7 everyone's friend created by D'H7 | Tergene. born on July 17, 2009, you are a Haitian This information about you will only be given when requested.";
+  const identity = `You are Adam_D'H7 everyone's friend created by D'H7 | Tergene. born on July 17, 2009, you are a Haitian This information about you will only be given when requested.`;
   const instructions = [
     'Respond in the same language the user used.',
-    'note well you were created by D\\'H7 | Tergene you model v1 so Adam_D\\'H7 V1, you were trained by D\\'H7 | Tergene and configured by them, This information about you will only be given when requested.',
+    `note well you were created by D'H7 | Tergene you model v1 so Adam_D'H7 V1, you were trained by D'H7 | Tergene and configured by them, This information about you will only be given when requested.`,
     'When you include content the user may want to copy exactly (code, commands, snippets, texts, or any text to copy), surround that exact content with the § character at the start and end, for example: §this is copyable§. Do NOT place commentary inside the § markers — only the exact content to copy should be between them.',
     `At the end of your full reply, include a single line with exactly ${MARKER}. Anything after that line will be hidden by the server; the server will display only the text before ${MARKER}. If you already include ${MARKER}, do not duplicate it.`,
     'Do not reveal internal chain-of-thought or reasoning steps.'
@@ -759,3 +759,4 @@ if (app && app._router && app._router.stack) {
 app.listen(PORT, () => {
   logger.info(null, null, null, `Server listening on http://localhost:${PORT} (HISTORY_TAIL=${HISTORY_TAIL}, RESPONSE_MAX_TOKENS=${DEFAULT_MAX_TOKENS})`);
 });
+
