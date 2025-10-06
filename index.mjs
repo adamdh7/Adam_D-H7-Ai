@@ -32,9 +32,9 @@ let HISTORY_TAIL = (raw !== undefined && raw !== '') ? Number(raw) : 777;
 if (!Number.isFinite(HISTORY_TAIL)) HISTORY_TAIL = 777;
 if (HISTORY_TAIL <= 0) HISTORY_TAIL = 777;
 
-const DEFAULT_MAX_TOKENS = Number(process.env.DEFAULT_MAX_TOKENS) || 10000;
-const MAX_ALLOWED_TOKENS = Number(process.env.MAX_ALLOWED_TOKENS) || 10000;
-const MAX_CONTEXT_TOKENS = Number(process.env.MAX_CONTEXT_TOKENS) || 2048;
+const DEFAULT_MAX_TOKENS = Number(process.env.DEFAULT_MAX_TOKENS) || 1024;
+const MAX_ALLOWED_TOKENS = Number(process.env.MAX_ALLOWED_TOKENS) || 1024;
+const MAX_CONTEXT_TOKENS = Number(process.env.MAX_CONTEXT_TOKENS) || 8192;
 const DEFAULT_TIMEOUT_MS = Number(process.env.DEFAULT_TIMEOUT_MS) || 120000;
 const MAX_RETRIES = Number(process.env.MAX_RETRIES) || 5;
 const MAX_CONTINUATIONS = Number(process.env.MAX_CONTINUATIONS) || 6;
@@ -56,6 +56,7 @@ app.use((req, res, next) => {
   next();
 });
 
+/* Helpers: read/write safe */
 async function readJsonSafe(filePath, defaultValue) {
   try {
     const raw = await fs.readFile(filePath, 'utf8');
@@ -170,6 +171,7 @@ function sleep(ms) {
   return new Promise(resolve => setTimeout(resolve, ms));
 }
 
+/* fetchWithTimeout: returns relevant headers (Retry-After) */
 async function fetchWithTimeout(url, options = {}, timeoutMs = DEFAULT_TIMEOUT_MS) {
   const controller = new AbortController();
   const id = setTimeout(() => {
@@ -180,10 +182,18 @@ async function fetchWithTimeout(url, options = {}, timeoutMs = DEFAULT_TIMEOUT_M
     const txt = await r.text();
     let parsed = null;
     try { parsed = JSON.parse(txt); } catch (e) { parsed = null; }
-    return { ok: r.ok, status: r.status, text: txt, json: parsed, fetchError: null };
+
+    // capture relevant headers
+    const headers = {};
+    try {
+      const ra = r.headers.get('retry-after');
+      if (ra) headers['retry-after'] = ra;
+    } catch (e) {}
+
+    return { ok: r.ok, status: r.status, text: txt, json: parsed, fetchError: null, headers };
   } catch (err) {
     const normalized = err instanceof Error ? err : new Error(String(err));
-    return { ok: false, fetchError: normalized, status: 502, text: String(normalized) };
+    return { ok: false, fetchError: normalized, status: 502, text: String(normalized), headers: {} };
   } finally {
     clearTimeout(id);
   }
@@ -194,25 +204,15 @@ await readJsonSafe(USERS_FILE, { users: [] });
 await readJsonSafe(SESSIONS_FILE, { sessions: {} });
 await readJsonSafe(USER_HISTORY_FILE, { histories: {} });
 
-/* Copy-marker helpers
-   - normalizeCopyMarkers: remove accidental spaces inside § ... § so § code § -> §code§
-   - renderCopyableMarkersToMarkdown: replace §content§ with ```content```
-*/
+/* Copy-marker helpers */
 function normalizeCopyMarkers(text) {
   if (!text || typeof text !== 'string') return text;
-  // remove spaces directly inside the markers
-  // matches §   something   § and normalizes to §something§
   return text.replace(/§\s*([\s\S]*?)\s*§/g, '§$1§');
 }
-
 function renderCopyableMarkersToMarkdown(text) {
   if (!text || typeof text !== 'string') return text;
-  // Normalize first (remove accidental spaces)
   const normalized = normalizeCopyMarkers(text);
-  // Replace each §...§ with triple backtick block for easy copy/paste in clients
-  // Use non-greedy match
   return normalized.replace(/§([\s\S]*?)§/g, (m, p1) => {
-    // Trim the inner content's leading/trailing newlines to make blocks tidy
     const inner = String(p1).replace(/^\n+|\n+$/g, '');
     return '```' + inner + '```';
   });
@@ -224,7 +224,6 @@ function makeSystemPrompt(tfid, sessionId, userName = null) {
   const instructions = [
     'Respond in the same language the user used.',
     'note well you were created by D\'H7 | Tergene you model v1 so Adam_D\'H7 V1, you were trained by D\'H7 | Tergene and configured by them, This information about you will only be given when requested.',
-    // Clear instruction to use § markers for copyable content:
     'When you include content the user may want to copy exactly (code, commands, snippets, texts, or any text to copy), surround that exact content with the § character at the start and end, for example: §this is copyable§. Do NOT place commentary inside the § markers — only the exact content to copy should be between them.',
     `At the end of your full reply, include a single line with exactly ${MARKER}. Anything after that line will be hidden by the server; the server will display only the text before ${MARKER}. If you already include ${MARKER}, do not duplicate it.`,
     'Do not reveal internal chain-of-thought or reasoning steps.'
@@ -248,7 +247,7 @@ function formatSessionForClient(sessionObj) {
   return out;
 }
 
-/* Routes (same as original) */
+/* Routes */
 app.post('/user', async (req, res) => {
   try {
     const { name, tfid } = req.body || {};
@@ -365,15 +364,20 @@ async function handleMessage(req, res) {
     }
 
     let promptTokens = estimatePromptTokens(systemMsg, tail, clean);
-    while (tail.length > 0 && (promptTokens + DEFAULT_MAX_TOKENS > MAX_CONTEXT_TOKENS)) {
+
+    // Correct trimming logic: reserve allowed response tokens, compute max prompt tokens
+    const allowedResponseTokens = Math.min(DEFAULT_MAX_TOKENS, MAX_ALLOWED_TOKENS);
+    const maxPromptTokens = Math.max(0, MAX_CONTEXT_TOKENS - allowedResponseTokens);
+
+    while (tail.length > 0 && promptTokens > maxPromptTokens) {
       tail.shift();
       promptTokens = estimatePromptTokens(systemMsg, tail, clean);
     }
 
-    if (promptTokens + DEFAULT_MAX_TOKENS > MAX_CONTEXT_TOKENS) {
-      console.warn('Prompt still large after trimming; provider may truncate. Estimated prompt tokens:', promptTokens);
+    if (promptTokens > maxPromptTokens) {
+      console.warn('Prompt still large after trimming; provider may truncate. Estimated prompt tokens:', promptTokens, 'maxPromptTokens:', maxPromptTokens);
     } else {
-      console.log('Prompt tokens after trimming:', promptTokens, ' Response tokens cap:', DEFAULT_MAX_TOKENS);
+      console.log('Prompt tokens after trimming:', promptTokens, 'Response tokens cap:', allowedResponseTokens);
     }
 
     function abbreviateMessages(arr, maxChars = 400) {
@@ -439,10 +443,13 @@ async function handleMessage(req, res) {
         body: JSON.stringify(payload)
       }, attemptTimeout);
 
+      // Network-level error (fetch failed)
       if (!lastResp.ok && lastResp.fetchError) {
         console.warn(`Provider network error (attempt ${attempt}):`, lastResp.fetchError);
         if (attempt < MAX_RETRIES) {
-          await sleep(backoffMs);
+          const jitter = Math.floor(Math.random() * 300);
+          const wait = Math.min(MAX_BACKOFF_MS, backoffMs + jitter);
+          await sleep(wait);
           backoffMs = Math.min(MAX_BACKOFF_MS, Math.floor(backoffMs * BACKOFF_MULT));
           continue;
         } else {
@@ -450,17 +457,37 @@ async function handleMessage(req, res) {
         }
       }
 
+      // Non-OK HTTP status handling (including 429)
       if (!lastResp.ok) {
         console.warn(`Provider returned status ${lastResp.status} (attempt ${attempt}).`);
-        // If 502/503/504, retry
-        if ([502, 503, 504].includes(lastResp.status) && attempt < MAX_RETRIES) {
-          await sleep(backoffMs);
+
+        // If provider provided Retry-After header, use it
+        const retryAfterSec = lastResp.headers?.['retry-after'] ? Number(lastResp.headers['retry-after']) : null;
+
+        if (lastResp.status === 429 && attempt < MAX_RETRIES) {
+          const base = retryAfterSec ? retryAfterSec * 1000 : backoffMs;
+          const jitter = Math.floor(Math.random() * Math.min(1000, base));
+          const waitMs = Math.min(MAX_BACKOFF_MS, base + jitter);
+          console.warn(`Received 429. Waiting ${waitMs}ms before retrying (Retry-After=${retryAfterSec}).`);
+          if (lastResp.text) console.warn('429 body preview:', String(lastResp.text).slice(0, 1000));
+          await sleep(waitMs);
           backoffMs = Math.min(MAX_BACKOFF_MS, Math.floor(backoffMs * BACKOFF_MULT));
           continue;
         }
+
+        if ([502, 503, 504].includes(lastResp.status) && attempt < MAX_RETRIES) {
+          const jitter = Math.floor(Math.random() * 300);
+          const wait = Math.min(MAX_BACKOFF_MS, backoffMs + jitter);
+          console.warn(`Transient error ${lastResp.status}, retrying in ${wait}ms.`);
+          await sleep(wait);
+          backoffMs = Math.min(MAX_BACKOFF_MS, Math.floor(backoffMs * BACKOFF_MULT));
+          continue;
+        }
+
         break;
       }
 
+      // OK response
       const part = extractAssistantText(lastResp.json) || (lastResp.text && lastResp.text.trim()) || null;
       if (part) accumulated = accumulated ? (accumulated + '\n' + part) : part;
 
@@ -501,7 +528,7 @@ async function handleMessage(req, res) {
         assistantText = accumulated || null;
         break;
       }
-    }
+    } // end attempts loop
 
     if (assistantText) {
       // Wrap with server marker if not present
@@ -525,16 +552,13 @@ async function handleMessage(req, res) {
         return '§' + inner + '§';
       });
 
-      // 3) Also convert fenced HTML-style or other edge cases (just in case)
-      //    (no-op if none found)
-
-      // 4) Prepare a rendered version (```...```) if UI wants to show it
+      // 3) Prepare a rendered version (```...```) if UI wants to show it
       const rendered = renderCopyableMarkersToMarkdown(normalized);
 
       // Return RAW with § as primary field, plus optional rendered.
       return res.json({
-        assistant: normalized,            // raw text with §...§ blocks for copy
-        assistant_rendered: rendered,     // client-friendly ```...``` blocks (optional)
+        assistant: normalized,
+        assistant_rendered: rendered,
         session: formatSessionForClient(session)
       });
     }
