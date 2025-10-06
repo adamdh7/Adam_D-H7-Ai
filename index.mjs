@@ -4,6 +4,7 @@ import path from 'path';
 import { fileURLToPath } from 'url';
 import dotenv from 'dotenv';
 import { promises as fs } from 'fs';
+import fsSync from 'fs';
 import crypto from 'crypto';
 
 dotenv.config();
@@ -46,13 +47,63 @@ const USERS_FILE = path.join(__dirname, 'user.json');
 const SESSIONS_FILE = path.join(__dirname, 'sessions.json');
 const USER_HISTORY_FILE = path.join(__dirname, 'user_history.json');
 
+/* Logging setup */
+const LOG_FILE = path.join(__dirname, 'server.log');
+function appendLogLine(line) {
+  try {
+    fsSync.appendFileSync(LOG_FILE, line + '\n');
+  } catch (e) {
+    console.error('Failed to write log file:', e?.message || e);
+  }
+}
+function makeLogLine(level, requestId, tfid, sessionId, msg) {
+  const ts = new Date().toISOString();
+  const parts = [`${ts}`, level.toUpperCase(), `req=${requestId || '-'}`];
+  if (tfid) parts.push(`tfid=${tfid}`);
+  if (sessionId) parts.push(`sid=${sessionId}`);
+  parts.push('-', typeof msg === 'string' ? msg : JSON.stringify(msg));
+  return parts.join(' ');
+}
+const logger = {
+  info: (requestId, tfid, sessionId, msg) => {
+    const line = makeLogLine('info', requestId, tfid, sessionId, msg);
+    console.log(line);
+    appendLogLine(line);
+  },
+  warn: (requestId, tfid, sessionId, msg) => {
+    const line = makeLogLine('warn', requestId, tfid, sessionId, msg);
+    console.warn(line);
+    appendLogLine(line);
+  },
+  error: (requestId, tfid, sessionId, msg) => {
+    const line = makeLogLine('error', requestId, tfid, sessionId, msg);
+    console.error(line);
+    appendLogLine(line);
+  }
+};
+
 app.use(cors({ origin: true }));
 app.use(express.json({ limit: '1000mb' }));
 app.use(express.urlencoded({ extended: false }));
 app.use(express.static(path.join(__dirname, 'public')));
 
+/* Request-ID middleware */
 app.use((req, res, next) => {
-  console.log(`[${new Date().toISOString()}] ${req.method} ${req.originalUrl} body:`, req.body ? (Object.keys(req.body).length ? '<body>' : '{}') : {});
+  const rid = req.headers['x-request-id'] || crypto.randomUUID();
+  req.requestId = rid;
+  res.setHeader('X-Request-ID', rid);
+  next();
+});
+
+/* Access log middleware (uses logger) */
+app.use((req, res, next) => {
+  const shortBody = req.body && Object.keys(req.body).length ? '<body>' : '{}';
+  logger.info(req.requestId, null, null, `${req.method} ${req.originalUrl} body: ${shortBody}`);
+  const start = Date.now();
+  res.once('finish', () => {
+    const dur = Date.now() - start;
+    logger.info(req.requestId, null, null, `→ ${res.statusCode} ${req.method} ${req.originalUrl} (${dur}ms)`);
+  });
   next();
 });
 
@@ -162,7 +213,7 @@ function extractAssistantText(payloadJson) {
       if (candidate) return candidate;
     }
   } catch (e) {
-    console.error('extractAssistantText error', e);
+    logger.error(null, null, null, `extractAssistantText error: ${String(e)}`);
   }
   return null;
 }
@@ -268,7 +319,7 @@ app.post('/user', async (req, res) => {
     await writeJsonSafe(USER_HISTORY_FILE, hist);
     return res.json(user);
   } catch (err) {
-    console.error('/user error', err);
+    logger.error(req.requestId, null, null, `/user error: ${String(err)}`);
     return res.status(500).json({ error: 'server_error', details: String(err?.message || err) });
   }
 });
@@ -289,7 +340,7 @@ app.post('/session', async (req, res) => {
     const clientShape = formatSessionForClient(session);
     return res.json({ sessionId, ...clientShape });
   } catch (err) {
-    console.error('/session error', err);
+    logger.error(req.requestId, null, null, `/session error: ${String(err)}`);
     return res.status(500).json({ error: 'server_error', details: String(err?.message || err) });
   }
 });
@@ -304,7 +355,7 @@ app.get('/sessions', async (req, res) => {
     const out = filtered.map(formatSessionForClient);
     return res.json(out);
   } catch (err) {
-    console.error('/sessions error', err);
+    logger.error(req.requestId, null, null, `/sessions error: ${String(err)}`);
     return res.status(500).json({ error: String(err?.message || err) });
   }
 });
@@ -317,7 +368,7 @@ app.get('/history/:tfid/:n?', async (req, res) => {
     const arr = (hist.histories && hist.histories[tfid]) ? hist.histories[tfid] : [];
     return res.json(arr.slice(-n));
   } catch (err) {
-    console.error('/history error', err);
+    logger.error(req.requestId, null, null, `/history error: ${String(err)}`);
     return res.status(500).json({ error: String(err?.message || err) });
   }
 });
@@ -375,9 +426,9 @@ async function handleMessage(req, res) {
     }
 
     if (promptTokens > maxPromptTokens) {
-      console.warn('Prompt still large after trimming; provider may truncate. Estimated prompt tokens:', promptTokens, 'maxPromptTokens:', maxPromptTokens);
+      logger.warn(req.requestId, tfid, sessionId, `Prompt still large after trimming; estimated prompt tokens: ${promptTokens}, maxPromptTokens: ${maxPromptTokens}`);
     } else {
-      console.log('Prompt tokens after trimming:', promptTokens, 'Response tokens cap:', allowedResponseTokens);
+      logger.info(req.requestId, tfid, sessionId, `Prompt tokens after trimming: ${promptTokens}, response tokens cap: ${allowedResponseTokens}`);
     }
 
     function abbreviateMessages(arr, maxChars = 400) {
@@ -409,6 +460,7 @@ async function handleMessage(req, res) {
 
     while (attempt < MAX_RETRIES) {
       attempt++;
+      const attemptStart = Date.now();
       const attemptTimeout = DEFAULT_TIMEOUT_MS + (attempt - 1) * EXTRA_TIMEOUT_PER_ATTEMPT;
 
       // Build Google generateContent payload
@@ -443,12 +495,21 @@ async function handleMessage(req, res) {
         body: JSON.stringify(payload)
       }, attemptTimeout);
 
+      const attemptDur = Date.now() - attemptStart;
+      logger.info(req.requestId, tfid, sessionId, `provider attempt=${attempt} status=${lastResp.status} duration=${attemptDur}ms headers=${JSON.stringify(lastResp.headers || {})}`);
+
+      if (lastResp.text) {
+        const preview = String(lastResp.text).slice(0, 800).replace(/\s+/g,' ');
+        logger.info(req.requestId, tfid, sessionId, `provider body preview: ${preview}${lastResp.text.length > 800 ? '...[truncated]' : ''}`);
+      }
+
       // Network-level error (fetch failed)
       if (!lastResp.ok && lastResp.fetchError) {
-        console.warn(`Provider network error (attempt ${attempt}):`, lastResp.fetchError);
+        logger.warn(req.requestId, tfid, sessionId, `Provider network error (attempt ${attempt}): ${String(lastResp.fetchError)}`);
         if (attempt < MAX_RETRIES) {
           const jitter = Math.floor(Math.random() * 300);
           const wait = Math.min(MAX_BACKOFF_MS, backoffMs + jitter);
+          logger.info(req.requestId, tfid, sessionId, `network retry in ${wait}ms`);
           await sleep(wait);
           backoffMs = Math.min(MAX_BACKOFF_MS, Math.floor(backoffMs * BACKOFF_MULT));
           continue;
@@ -459,7 +520,7 @@ async function handleMessage(req, res) {
 
       // Non-OK HTTP status handling (including 429)
       if (!lastResp.ok) {
-        console.warn(`Provider returned status ${lastResp.status} (attempt ${attempt}).`);
+        logger.warn(req.requestId, tfid, sessionId, `Provider returned status ${lastResp.status} (attempt ${attempt}).`);
 
         // If provider provided Retry-After header, use it
         const retryAfterSec = lastResp.headers?.['retry-after'] ? Number(lastResp.headers['retry-after']) : null;
@@ -468,8 +529,7 @@ async function handleMessage(req, res) {
           const base = retryAfterSec ? retryAfterSec * 1000 : backoffMs;
           const jitter = Math.floor(Math.random() * Math.min(1000, base));
           const waitMs = Math.min(MAX_BACKOFF_MS, base + jitter);
-          console.warn(`Received 429. Waiting ${waitMs}ms before retrying (Retry-After=${retryAfterSec}).`);
-          if (lastResp.text) console.warn('429 body preview:', String(lastResp.text).slice(0, 1000));
+          logger.warn(req.requestId, tfid, sessionId, `Received 429. Waiting ${waitMs}ms before retrying (Retry-After=${retryAfterSec}).`);
           await sleep(waitMs);
           backoffMs = Math.min(MAX_BACKOFF_MS, Math.floor(backoffMs * BACKOFF_MULT));
           continue;
@@ -478,7 +538,7 @@ async function handleMessage(req, res) {
         if ([502, 503, 504].includes(lastResp.status) && attempt < MAX_RETRIES) {
           const jitter = Math.floor(Math.random() * 300);
           const wait = Math.min(MAX_BACKOFF_MS, backoffMs + jitter);
-          console.warn(`Transient error ${lastResp.status}, retrying in ${wait}ms.`);
+          logger.info(req.requestId, tfid, sessionId, `Transient error ${lastResp.status}, retrying in ${wait}ms.`);
           await sleep(wait);
           backoffMs = Math.min(MAX_BACKOFF_MS, Math.floor(backoffMs * BACKOFF_MULT));
           continue;
@@ -503,12 +563,12 @@ async function handleMessage(req, res) {
         break;
       }
 
-      console.warn(`Model truncated (finishReason=${finishReason}) on attempt ${attempt}.`);
+      logger.warn(req.requestId, tfid, sessionId, `Model truncated (finishReason=${finishReason}) on attempt ${attempt}.`);
 
       const prev = currentMax;
       currentMax = Math.min(MAX_ALLOWED_TOKENS, Math.max(currentMax + 32, Math.floor(currentMax * 1.5)));
       if (currentMax !== prev && currentMax <= MAX_ALLOWED_TOKENS) {
-        console.warn(`Increasing max tokens ${prev} -> ${currentMax} and retrying.`);
+        logger.info(req.requestId, tfid, sessionId, `Increasing max tokens ${prev} -> ${currentMax} and retrying.`);
         await sleep(200);
         continue;
       }
@@ -521,10 +581,10 @@ async function handleMessage(req, res) {
           { role: 'assistant', content: accumulated },
           { role: 'user', content: 'Continue la réponse précédente.' }
         ];
-        console.warn(`Issuing continuation #${continuations} to fetch remaining content.`);
+        logger.info(req.requestId, tfid, sessionId, `Issuing continuation #${continuations} to fetch remaining content.`);
         continue;
       } else {
-        console.warn('No more continuation attempts allowed or nothing accumulated. Breaking.');
+        logger.warn(req.requestId, tfid, sessionId, 'No more continuation attempts allowed or nothing accumulated. Breaking.');
         assistantText = accumulated || null;
         break;
       }
@@ -555,6 +615,8 @@ async function handleMessage(req, res) {
       // 3) Prepare a rendered version (```...```) if UI wants to show it
       const rendered = renderCopyableMarkersToMarkdown(normalized);
 
+      logger.info(req.requestId, tfid, sessionId, `assistantText length=${String(assistantText).length} saved to session`);
+
       // Return RAW with § as primary field, plus optional rendered.
       return res.json({
         assistant: normalized,
@@ -563,10 +625,10 @@ async function handleMessage(req, res) {
       });
     }
 
-    console.error('No assistant text extracted after retries/continuations.');
+    logger.error(req.requestId, tfid, sessionId, 'No assistant text extracted after retries/continuations.');
     if (lastResp) {
-      console.error('Provider lastResp status:', lastResp.status);
-      if (lastResp.fetchError) console.error('Provider fetchError:', lastResp.fetchError);
+      logger.error(req.requestId, tfid, sessionId, `Provider lastResp status: ${lastResp.status}`);
+      if (lastResp.fetchError) logger.error(req.requestId, tfid, sessionId, `Provider fetchError: ${String(lastResp.fetchError)}`);
       if (lastResp.text && lastResp.text.trim()) {
         const statusToSend = Number.isInteger(lastResp.status) ? lastResp.status : 502;
         return res.status(statusToSend).type('text').send(lastResp.text);
@@ -575,7 +637,7 @@ async function handleMessage(req, res) {
 
     return res.status(502).json({ error: 'no_response_from_provider' });
   } catch (err) {
-    console.error('/message error', err);
+    logger.error(req.requestId, null, null, `/message error: ${String(err)}`);
     return res.status(500).json({ error: 'server_error', details: String(err?.message || err) });
   }
 }
@@ -600,5 +662,5 @@ if (app && app._router && app._router.stack) {
 }
 
 app.listen(PORT, () => {
-  console.log(`Server listening on http://localhost:${PORT} (HISTORY_TAIL=${HISTORY_TAIL}, RESPONSE_MAX_TOKENS=${DEFAULT_MAX_TOKENS})`);
+  logger.info(null, null, null, `Server listening on http://localhost:${PORT} (HISTORY_TAIL=${HISTORY_TAIL}, RESPONSE_MAX_TOKENS=${DEFAULT_MAX_TOKENS})`);
 });
