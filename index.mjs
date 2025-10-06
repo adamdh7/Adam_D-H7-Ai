@@ -23,11 +23,11 @@ const GOOGLE_API_KEY = process.env.GOOGLE_API_KEY || '';
 const GOOGLE_BASE = process.env.GOOGLE_BASE || 'https://generativelanguage.googleapis.com';
 const GOOGLE_MODEL = process.env.GOOGLE_MODEL || 'gemini-2.0-flash';
 
-/* NOTE: on some deployments you may not have a Google key (for local testing).
-   If you *require* the provider, keep the exit below; otherwise you can comment it out.
+/* NOTE: for local testing you may not set GOOGLE_API_KEY.
+   If you want the server to fail fast when missing, uncomment the exit.
 */
 if (!GOOGLE_API_KEY) {
-  console.error('WARN: GOOGLE_API_KEY not set. Provider calls will fail unless you set GOOGLE_API_KEY.');
+  console.warn('WARN: GOOGLE_API_KEY not set. Provider calls will fail unless you set GOOGLE_API_KEY.');
   // process.exit(1);
 }
 
@@ -285,7 +285,7 @@ function makeSystemPrompt(tfid, sessionId, userName = null) {
   const identity = "You are Adam_D'H7 everyone's friend created by D'H7 | Tergene. born on July 17, 2009, you are a Haitian This information about you will only be given when requested.";
   const instructions = [
     'Respond in the same language the user used.',
-    'note well you were created by D\'H7 | Tergene you model v1 so Adam_D\'H7 V1, you were trained by D\'H7 | Tergene and configured by them, This information about you will only be given when requested.',
+    'note well you were created by D\\'H7 | Tergene you model v1 so Adam_D\\'H7 V1, you were trained by D\\'H7 | Tergene and configured by them, This information about you will only be given when requested.',
     'When you include content the user may want to copy exactly (code, commands, snippets, texts, or any text to copy), surround that exact content with the § character at the start and end, for example: §this is copyable§. Do NOT place commentary inside the § markers — only the exact content to copy should be between them.',
     `At the end of your full reply, include a single line with exactly ${MARKER}. Anything after that line will be hidden by the server; the server will display only the text before ${MARKER}. If you already include ${MARKER}, do not duplicate it.`,
     'Do not reveal internal chain-of-thought or reasoning steps.'
@@ -399,9 +399,11 @@ app.get('/history/:tfid/:n?', async (req, res) => {
 });
 
 /* Core handler using Google generateContent
-   Robust behavior requested: if tfid is missing/invalid, auto-create user;
-   if sessionId missing/invalid, auto-create session.
-   Response will include current tfid and session (so frontend can update localStorage).
+   Behavior:
+   - If client supplies a tfid that doesn't exist server-side, the server will RECREATE a user WITH THE SAME TFID.
+   - If no tfid provided, server will create a new TFID.
+   - If client supplies sessionId that doesn't exist, server will create a session with that id tied to the (possibly recreated) tfid.
+   - All messages are appended to sessions.json and user_history.json so client does not need to wipe localStorage.
 */
 async function handleMessage(req, res) {
   try {
@@ -416,28 +418,51 @@ async function handleMessage(req, res) {
     }
     const clean = String(text).trim();
 
-    // Ensure users file and find or create user automatically
+    // --- USERS: load and find/create (preserve client-sent TFID if it's valid) ---
     const usersObj = await readJsonSafe(USERS_FILE, { users: [] });
     usersObj.users = usersObj.users || [];
-    let user = tfid ? (usersObj.users.find(u => u.tfid === tfid)) : null;
 
-    if (!user) {
-      // create a new user automatically
-      const newTF = await ensureUniqueTFID();
-      user = { tfid: newTF, name: DEFAULT_USER_NAME, createdAt: new Date().toISOString() };
-      usersObj.users.push(user);
-      try { await writeJsonSafe(USERS_FILE, usersObj); } catch (e) { logger.error(req.requestId, null, null, `Failed writing user.json: ${String(e)}`); }
-      logger.warn(req.requestId, tfid, sessionId, `tfid missing/invalid; created new user ${newTF}`);
-      tfid = newTF; // adopt new tfid for the rest of handling
+    // Helper: simple sanitize for client TFID format (adjust regex if you change TFID format)
+    function sanitizeClientTFID(candidate) {
+      if (!candidate || typeof candidate !== 'string') return null;
+      const s = String(candidate).trim();
+      if (/^TF-[A-Za-z0-9]{4,32}$/.test(s)) return s;
+      return null;
     }
 
-    // Ensure sessions file and find or create session automatically
+    let user = null;
+    const clientTF = sanitizeClientTFID(tfid);
+
+    if (clientTF) {
+      user = usersObj.users.find(u => u.tfid === clientTF) || null;
+    }
+
+    if (!user) {
+      if (clientTF) {
+        // Recreate user entry with SAME TFID so frontend's localStorage remains valid.
+        user = { tfid: clientTF, name: DEFAULT_USER_NAME, createdAt: new Date().toISOString() };
+        usersObj.users.push(user);
+        try { await writeJsonSafe(USERS_FILE, usersObj); } catch (e) { logger.error(req.requestId, null, null, `Failed writing user.json: ${String(e)}`); }
+        logger.warn(req.requestId, clientTF, sessionId, `tfid missing; recreated user with same tfid ${clientTF}`);
+        tfid = clientTF;
+      } else {
+        // No TFID provided or invalid: create new TFID
+        const newTF = await ensureUniqueTFID();
+        user = { tfid: newTF, name: DEFAULT_USER_NAME, createdAt: new Date().toISOString() };
+        usersObj.users.push(user);
+        try { await writeJsonSafe(USERS_FILE, usersObj); } catch (e) { logger.error(req.requestId, null, null, `Failed writing user.json: ${String(e)}`); }
+        logger.warn(req.requestId, null, sessionId, `No tfid provided; created new user ${newTF}`);
+        tfid = newTF;
+      }
+    }
+
+    // --- SESSIONS: load and find/create ---
     const sessionsData = await readJsonSafe(SESSIONS_FILE, { sessions: {} });
     sessionsData.sessions = sessionsData.sessions || {};
     let session = sessionId ? sessionsData.sessions[sessionId] : null;
 
     if (!session) {
-      // If client provided sessionId but it's not found, create a session with that id to preserve reference
+      // If client provided sessionId but it wasn't found, create a session WITH THAT SAME ID (preserve client reference)
       const createId = sessionId || crypto.randomUUID();
       session = { sessionId: createId, tfid, title: 'Recovered Chat', createdAt: new Date().toISOString(), messages: [] };
       sessionsData.sessions[createId] = session;
@@ -447,7 +472,7 @@ async function handleMessage(req, res) {
     }
 
     if (session.tfid !== tfid) {
-      // If there's a mismatch, recreate a session for this tfid (do not overwrite other user's session)
+      // If the found session belongs to another user, create a new fresh session for this tfid
       const newSessionId = crypto.randomUUID();
       session = { sessionId: newSessionId, tfid, title: 'Recovered Chat', createdAt: new Date().toISOString(), messages: [] };
       sessionsData.sessions[newSessionId] = session;
@@ -456,7 +481,7 @@ async function handleMessage(req, res) {
       logger.warn(req.requestId, tfid, sessionId, `session belonged to another user; created session ${newSessionId} for tfid=${tfid}`);
     }
 
-    // Push user message to session and to history
+    // Append user message to session and user_history
     session.messages = session.messages || [];
     session.messages.push({ role: 'user', content: clean, ts: Date.now() });
 
@@ -465,19 +490,11 @@ async function handleMessage(req, res) {
     hist.histories[tfid] = hist.histories[tfid] || [];
     hist.histories[tfid].push({ role: 'user', content: clean, sessionId, ts: Date.now() });
 
-    // Persist session and history (and users already persisted earlier)
-    try {
-      await writeJsonSafe(SESSIONS_FILE, sessionsData);
-    } catch (e) {
-      logger.error(req.requestId, tfid, sessionId, `Failed to persist sessions: ${String(e)}`);
-    }
-    try {
-      await writeJsonSafe(USER_HISTORY_FILE, hist);
-    } catch (e) {
-      logger.error(req.requestId, tfid, sessionId, `Failed to persist user_history: ${String(e)}`);
-    }
+    // Persist session & history
+    try { await writeJsonSafe(SESSIONS_FILE, sessionsData); } catch (e) { logger.error(req.requestId, tfid, sessionId, `Failed to persist sessions: ${String(e)}`); }
+    try { await writeJsonSafe(USER_HISTORY_FILE, hist); } catch (e) { logger.error(req.requestId, tfid, sessionId, `Failed to persist user_history: ${String(e)}`); }
 
-    // Build prompt & handle provider logic (kept similar to earlier implementation)
+    // Build prompt & trimming logic (same as before)
     const systemMsg = makeSystemPrompt(tfid, sessionId, user.name || DEFAULT_USER_NAME);
     let tail = (session.messages || []).slice(-HISTORY_TAIL).map(m => ({ role: m.role, content: m.content || '' }));
 
@@ -742,4 +759,3 @@ if (app && app._router && app._router.stack) {
 app.listen(PORT, () => {
   logger.info(null, null, null, `Server listening on http://localhost:${PORT} (HISTORY_TAIL=${HISTORY_TAIL}, RESPONSE_MAX_TOKENS=${DEFAULT_MAX_TOKENS})`);
 });
-
