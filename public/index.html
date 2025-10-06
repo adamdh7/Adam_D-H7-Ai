@@ -2,10 +2,8 @@
 <html lang="ht">
 <head>
   <meta charset="UTF-8"/>
-  <!-- Prevent zooming on mobile -->
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no"/>
   <title>Adam_D'H7</title>
-  <!-- PWA manifest et icônes -->
   <link rel="manifest" href="manifest.json" />
   <link rel="icon" type="image/jpeg" href="https://res.cloudinary.com/dglludnfq/image/upload/v1759692398/tf-stream-url/IMG-20251002-WA0108.jpg" />
   <link rel="apple-touch-icon" href="https://res.cloudinary.com/dglludnfq/image/upload/v1759692398/tf-stream-url/IMG-20251002-WA0108.jpg" />
@@ -28,119 +26,109 @@
       --form-h: 84px;
     }
 
-    /* Prevent page scrolling (only chat-box should scroll) */
     html,body{
-      height:100%;
-      margin:0;
-      padding:0;
-      background:var(--bg);
-      color:var(--ai-text);
-      font-family:Arial,Helvetica,sans-serif;
-      -webkit-text-size-adjust:100%;
-      -webkit-overflow-scrolling:touch;
-      overscroll-behavior-y:none;
-      overflow:hidden; /* page won't scroll */
-      touch-action:pan-y;
+      height:100%; margin:0; padding:0; background:var(--bg); color:var(--ai-text);
+      font-family:Roboto, Arial, Helvetica, sans-serif; -webkit-text-size-adjust:100%;
+      -webkit-overflow-scrolling:touch; overscroll-behavior-y:none; overflow:hidden; touch-action:pan-y;
     }
 
-    /* Fixed header - always top */
     header{
-      background:var(--panel);
-      height:var(--header-h);
-      display:flex;
-      align-items:center;
-      justify-content:center;
-      position:fixed;
-      top:0;
-      left:0;
-      right:0;
-      z-index:999;
+      background:var(--panel); height:var(--header-h); display:flex; align-items:center; justify-content:center;
+      position:fixed; top:0; left:0; right:0; z-index:999; padding:0 12px; user-select:none;
       box-shadow:0 1px 0 rgba(255,255,255,0.02) inset;
-      padding:0 12px;
-      user-select:none;
     }
     .menu-btn{position:absolute;left:12px;font-size:22px;cursor:pointer;color:var(--ai-text)}
     .name-title{font-weight:800;color:var(--name-gray);font-size:20px;letter-spacing:0.2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 
-    /* Chat area - positioned between header and form (JS will tweak top/bottom on resize) */
     .chat-box{
-      position:fixed;
-      left:0;
-      right:0;
-      top:var(--header-h);
-      bottom:var(--form-h);
+      position:fixed; left:0; right:0; top:var(--header-h); bottom:var(--form-h);
+      display:flex; flex-direction:column; padding:12px 18px; overflow-y:auto; background:var(--panel);
+      box-sizing:border-box; -webkit-overflow-scrolling:touch;
+    }
+
+    /* Reduced spacing to avoid extra "enter" lines */
+    .message{ margin:6px 0; max-width:76%; position:relative; overflow-wrap:anywhere; word-break:break-word; white-space:pre-wrap; }
+    .message.user{ align-self:flex-end }
+    .message.bot{ align-self:flex-start }
+    .message.user .content{ background:var(--user-blue); color:var(--user-text); border-radius:18px; padding:10px 14px; }
+    .message.bot .content{ background:var(--ai-bubble); color:var(--ai-text); border-radius:18px; padding:10px 14px; border:1px solid var(--border); }
+    .content{ font-size:15px; line-height:1.35; margin:0; padding:0; } /* remove extra gap */
+    .timestamp{ font-size:11px; color:var(--timestamp); margin-top:6px; text-align:right }
+
+    .message.bot.thinking .content{ display:flex; align-items:center; justify-content:flex-start; gap:10px; background:var(--ai-bubble); padding:8px 12px }
+    .thinking-dots{ display:inline-flex; gap:8px }
+    .thinking-dots span{ display:inline-block; width:9px; height:9px; border-radius:50%; background:var(--timestamp); opacity:0.12; transform:translateY(0); animation:dot 1.6s infinite ease-in-out; }
+    .thinking-dots span:nth-child(1){ animation-delay:0s; } .thinking-dots span:nth-child(2){ animation-delay:0.45s; } .thinking-dots span:nth-child(3){ animation-delay:0.9s; }
+    @keyframes dot{ 0% {opacity:0.12; transform:translateY(0);} 25% {opacity:0.9; transform:translateY(-7px);} 55% {opacity:0.35; transform:translateY(0);} 100% {opacity:0.12; transform:translateY(0);} }
+
+    .sidebar{ position:fixed; top:0; left:-100%; width:80%; height:100%; background:var(--panel); z-index:1001; box-shadow:2px 0 12px rgba(0,0,0,0.7); transition:left .28s ease; padding:18px; color:var(--ai-text); box-sizing:border-box }
+    .sidebar.active{ left:0 }
+    .menu-header{ display:flex; justify-content:space-between; align-items:center; margin-bottom:12px }
+    .chat-list{ list-style:none; padding:0; margin:0; overflow-y:auto; max-height:calc(100% - 60px) }
+    .chat-list li{ padding:8px; border-radius:6px; cursor:pointer; transition:background .18s; margin-bottom:10px; color:var(--ai-text) }
+    .chat-list li:hover{ background:rgba(255,255,255,0.02) }
+    .sidebar .new-chat-btn{ background:none; border:1px solid rgba(255,255,255,0.06); color:var(--ai-text); padding:6px 10px; border-radius:8px; cursor:pointer; font-size:14px }
+
+    /* Code card style (APK-like) - reduced spacing */
+    .code-card{
+      background:transparent;
+      border-radius:12px;
+      overflow:hidden;
+      margin:4px 0; /* small margin so no extra enter appears */
+      max-width:100%;
+      box-shadow: 0 8px 20px rgba(0,0,0,0.4);
+      border:1px solid rgba(255,255,255,0.03);
+    }
+    .code-header{
       display:flex;
-      flex-direction:column;
-      padding:12px 18px;
-      padding-top: 12px;
-      padding-bottom: 12px;
-      overflow-y:auto;
-      background:var(--panel);
-      box-sizing:border-box;
-      -webkit-overflow-scrolling:touch;
+      align-items:center;
+      justify-content:space-between;
+      gap:12px;
+      padding:8px 10px;
+      background: linear-gradient(180deg, rgba(255,255,255,0.02), rgba(255,255,255,0.01));
+      border-bottom:1px solid rgba(255,255,255,0.02);
+      font-size:13px;
+      color:var(--ai-text);
+    }
+    .code-header .label{ display:flex; align-items:center; gap:8px; font-weight:600; color:var(--ai-text); }
+    .code-body{
+      background:#060606;
+      padding:8px 12px;
+      font-family: Menlo, Monaco, "Courier New", monospace;
+      font-size:13px;
+      color:#dfe7f5;
+      white-space:pre-wrap;
+      line-height:1.45;
+      margin:0;
     }
 
-    .message{margin:12px 0;max-width:72%;position:relative;overflow-wrap:anywhere;word-break:break-word;white-space:pre-wrap}
-    .message.user{align-self:flex-end}
-    .message.bot{align-self:flex-start}
-    .message.user .content{background:var(--user-blue);color:var(--user-text);border-radius:18px;padding:10px 14px}
-    .message.bot .content{background:var(--ai-bubble);color:var(--ai-text);border-radius:18px;padding:10px 14px;border:1px solid var(--border)}
-    .content{font-size:15px;line-height:1.35}
-    .timestamp{font-size:11px;color:var(--timestamp);margin-top:6px;text-align:right}
-
-    /* Thinking: inside bot bubble, slow dots */
-    .message.bot.thinking .content{display:flex;align-items:center;justify-content:flex-start;gap:10px;background:var(--ai-bubble);padding:8px 12px}
-    .thinking-dots{display:inline-flex;gap:8px}
-    .thinking-dots span{
-      display:inline-block;width:9px;height:9px;border-radius:50%;background:var(--timestamp);opacity:0.12;transform:translateY(0);animation:dot 1.6s infinite ease-in-out;
-    }
-    .thinking-dots span:nth-child(1){ animation-delay:0s; }
-    .thinking-dots span:nth-child(2){ animation-delay:0.45s; }
-    .thinking-dots span:nth-child(3){ animation-delay:0.9s; }
-    @keyframes dot{
-      0% {opacity:0.12; transform:translateY(0);}
-      25% {opacity:0.9; transform:translateY(-7px);}
-      55% {opacity:0.35; transform:translateY(0);}
-      100% {opacity:0.12; transform:translateY(0);}
-    }
-
-    /* Sidebar overlays header when active */
-    .sidebar{position:fixed;top:0;left:-100%;width:80%;height:100%;background:var(--panel);z-index:1001;box-shadow:2px 0 12px rgba(0,0,0,0.7);transition:left .28s ease;padding:18px;color:var(--ai-text);box-sizing:border-box}
-    .sidebar.active{left:0}
-    .menu-header{display:flex;justify-content:space-between;align-items:center;margin-bottom:12px}
-    .chat-list{list-style:none;padding:0;margin:0;overflow-y:auto;max-height:calc(100% - 60px)}
-    .chat-list li{padding:8px;border-radius:6px;cursor:pointer;transition:background .18s;margin-bottom:10px;color:var(--ai-text)}
-    .chat-list li:hover{background:rgba(255,255,255,0.02)}
-    .sidebar .new-chat-btn{background:none;border:1px solid rgba(255,255,255,0.06);color:var(--ai-text);padding:6px 10px;border-radius:8px;cursor:pointer;font-size:14px}
-
-    /* Code modal & copy */
-    .code-modal{background:#000;color:var(--ai-text);font-family:Menlo,monospace;padding:18px;border-radius:10px;margin:14px 0;max-width:90%;white-space:pre-wrap;border:1px solid rgba(255,255,255,0.03)}
-    .copy-btn{position:absolute;top:10px;right:10px;background:var(--user-blue);color:var(--user-text);border:none;border-radius:6px;padding:6px 10px;cursor:pointer}
-
-    /* Form fixed bottom */
-    form{display:flex;padding:12px;background:var(--panel);border-top:1px solid rgba(255,255,255,0.03);position:fixed;bottom:0;left:0;right:0;align-items:center;gap:10px;height:var(--form-h);box-sizing:border-box}
-    textarea{flex:1;padding:10px;font-size:15px;border-radius:18px;border:1px solid rgba(255,255,255,0.04);outline:none;resize:none;height:56px;background:#050505;color:var(--ai-text);box-sizing:border-box;width:100%}
-    textarea::placeholder{color:rgba(255,255,255,0.18)}
-
-    /* Send button styled for icon-only */
-    .send{
+    .code-copy-btn{
+      background:transparent;
+      border: none;
+      color:var(--ai-text);
+      cursor:pointer;
       display:inline-flex;
       align-items:center;
       justify-content:center;
-      width:48px;
-      height:48px;
-      background:linear-gradient(180deg,var(--user-blue),#06306a);
-      border-radius:50%;
-      border:none;
-      padding:0;
-      cursor:pointer;
-      box-shadow:0 6px 18px rgba(11,61,145,0.14);
+      padding:6px;
+      gap:8px;
+      border-radius:8px;
+      transition:background .12s ease;
     }
+    .code-copy-btn:hover{ background: rgba(255,255,255,0.02); }
+    .code-copy-icon{ width:18px; height:18px; display:inline-block; }
+
+    .code-header .right{ display:flex; align-items:center; gap:8px; }
+
+    form{ display:flex; padding:12px; background:var(--panel); border-top:1px solid rgba(255,255,255,0.03); position:fixed; bottom:0; left:0; right:0; align-items:center; gap:10px; height:var(--form-h); box-sizing:border-box }
+    textarea{ flex:1; padding:10px; font-size:15px; border-radius:18px; border:1px solid rgba(255,255,255,0.04); outline:none; resize:none; height:56px; background:#050505; color:var(--ai-text); box-sizing:border-box; width:100% }
+    textarea::placeholder{ color:rgba(255,255,255,0.18) }
+    .send{ display:inline-flex; align-items:center; justify-content:center; width:48px; height:48px; background:linear-gradient(180deg,var(--user-blue),#06306a); border-radius:50%; border:none; padding:0; cursor:pointer; box-shadow:0 6px 18px rgba(11,61,145,0.14); }
     .send svg{ width:20px; height:20px; display:block; filter:invert(1) contrast(200%); }
 
     @media (max-width:600px){
-      .chat-box{padding:12px;padding-top: calc(var(--header-h) + 8px);padding-bottom: calc(var(--form-h) + 8px)}
-      header{font-size:18px}
+      .chat-box{ padding:12px; padding-top: calc(var(--header-h) + 8px); padding-bottom: calc(var(--form-h) + 8px) }
+      header{ font-size:18px }
     }
   </style>
 </head>
@@ -170,9 +158,7 @@
   </form>
 
   <script>
-    // -------------------------
     // Helpers + layout
-    // -------------------------
     const headerEl = document.querySelector('header');
     const chatBox = document.getElementById('chatBox');
     const formEl = document.querySelector('form');
@@ -187,14 +173,11 @@
     }
 
     function adjustLayoutForViewport() {
-      // Set chatBox top/bottom based on actual header/form heights
       const headerH = headerEl.offsetHeight || 56;
       const formH = formEl.offsetHeight || 84;
       chatBox.style.top = headerH + 'px';
       chatBox.style.bottom = formH + 'px';
-      // ensure no extra padding top causes spacing
       chatBox.style.paddingTop = '12px';
-      // small delay to let mobile keyboard/layout settle
       setTimeout(()=> scrollToBottom(true), 60);
     }
 
@@ -208,19 +191,14 @@
     textarea.addEventListener('blur', ()=>{ setTimeout(()=> adjustLayoutForViewport(), 80); });
     textarea.addEventListener('input', ()=>{ scrollToBottom(true); });
 
-    // prevent pinch-zoom gesture where possible
     window.addEventListener('gesturestart', e => e.preventDefault());
 
-    // -------------------------
-    // Session & UI state (local)
-    // -------------------------
     if(!document.getElementById('headerName').textContent.trim()) document.getElementById('headerName').textContent = "Adam_D'H7";
     if (typeof Notification !== 'undefined' && Notification && Notification.permission !== 'granted') Notification.requestPermission();
 
     const STORAGE_KEY = 'tfai_sessions';
     let sessions = JSON.parse(localStorage.getItem(STORAGE_KEY) || '[]');
     let currentSession = sessions.length ? 0 : null;
-
     function save(){ localStorage.setItem(STORAGE_KEY, JSON.stringify(sessions)); }
 
     function toggleSidebar(){
@@ -243,6 +221,50 @@
       });
     }
 
+    // Utility: trim leading/trailing newlines but preserve internal ones
+    function trimNewlines(str){
+      if (typeof str !== 'string') return '';
+      return str.replace(/^\n+|\n+$/g, '');
+    }
+
+    /* copy only code content (inside ```), nothing else */
+    async function copyCode(msgIndex, codeIndex) {
+      try {
+        const sess = sessions[currentSession];
+        if (!sess) return;
+        const m = sess.messages[msgIndex];
+        if (!m || typeof m.text !== 'string') return;
+
+        const parts = m.text.split(/```/);
+        // code blocks are at odd indices
+        let cc = 0, codeContent = null;
+        for (let i = 0; i < parts.length; i++) {
+          if (i % 2 === 1) {
+            if (cc === codeIndex) { codeContent = trimNewlines(parts[i]); break; }
+            cc++;
+          }
+        }
+        if (codeContent === null) return;
+
+        // write only the code content to clipboard
+        await navigator.clipboard.writeText(codeContent);
+
+        // visual feedback on the specific button
+        const el = chatBox.querySelector(`.code-card[data-msg-idx="${msgIndex}"][data-code-idx="${codeIndex}"]`);
+        if (el) {
+          const btn = el.querySelector('.code-copy-btn');
+          if (btn) {
+            const prevHtml = btn.innerHTML;
+            btn.innerHTML = '<svg class="code-copy-icon" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true"><path d="M9 12l2 2 4-4" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>';
+            setTimeout(()=> { try { btn.innerHTML = prevHtml; } catch(e){} }, 1200);
+          }
+        }
+
+      } catch (e) {
+        console.warn('copyCode fail', e);
+      }
+    }
+
     function renderBox(){
       chatBox.innerHTML = '';
       if (currentSession === null) {
@@ -250,8 +272,9 @@
         return;
       }
       const sess = sessions[currentSession];
-      sess.messages.forEach(m => {
+      sess.messages.forEach((m, idx) => {
         const wrap = document.createElement('div');
+        wrap.setAttribute('data-idx', String(idx));
         if (m.sender === 'thinking') {
           wrap.className = 'message bot thinking';
           const content = document.createElement('div'); content.className = 'content';
@@ -259,14 +282,74 @@
           wrap.appendChild(content);
         } else {
           wrap.className = 'message ' + (m.sender === 'user' ? 'user' : 'bot');
-          if (typeof m.text === 'string' && m.text.startsWith('```') && m.text.endsWith('```')) {
-            const content = m.text.slice(3,-3);
-            const modal = document.createElement('div'); modal.className = 'code-modal'; modal.textContent = content;
-            const btn = document.createElement('button'); btn.className = 'copy-btn'; btn.textContent = 'Copy';
-            btn.onclick = ()=>{ navigator.clipboard.writeText(content); btn.textContent='✔️'; setTimeout(()=>btn.textContent='Copy',1000); };
-            modal.appendChild(btn); wrap.appendChild(modal);
+
+          // If message contains any ``` code blocks, split and render segments in order
+          if (typeof m.text === 'string' && m.text.includes('§')) {
+            const parts = m.text.split(/§/);
+            let codeCounter = 0;
+            for (let i = 0; i < parts.length; i++) {
+              if (i % 2 === 0) {
+                // plain text
+                const rawTxt = parts[i];
+                const txtClean = trimNewlines(rawTxt);
+                if (txtClean && txtClean.trim()) {
+                  const p = document.createElement('div');
+                  p.className = 'content';
+                  p.textContent = txtClean;
+                  wrap.appendChild(p);
+                }
+              } else {
+                // code segment -> create a code card, with data attributes for lookup
+                const rawCode = parts[i];
+                const codeText = trimNewlines(rawCode);
+
+                const card = document.createElement('div');
+                card.className = 'code-card';
+                card.setAttribute('data-msg-idx', String(idx));
+                card.setAttribute('data-code-idx', String(codeCounter));
+
+                const header = document.createElement('div');
+                header.className = 'code-header';
+
+                const left = document.createElement('div');
+                left.className = 'label';
+                left.innerHTML = '<svg style="width:14px;height:14px;opacity:0.9;margin-right:4px" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M9 12l2 2 4-4" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg><span> </span>';
+
+                const right = document.createElement('div');
+                right.className = 'right';
+
+                const btn = document.createElement('button');
+                btn.className = 'code-copy-btn';
+                btn.title = 'Copier le code';
+                btn.type = 'button';
+                btn.innerHTML = '<svg class="code-copy-icon" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true"><path d="M16 3H7a2 2 0 0 0-2 2v11" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/><rect x="9" y="7" width="11" height="11" rx="2" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>';
+
+                // closure to capture idx and codeCounter
+                (function(msgIdx, cIdx){
+                  btn.onclick = ()=> copyCode(msgIdx, cIdx);
+                })(idx, codeCounter);
+
+                right.appendChild(btn);
+                header.appendChild(left);
+                header.appendChild(right);
+
+                const body = document.createElement('div');
+                body.className = 'code-body';
+                body.textContent = codeText;
+
+                card.appendChild(header);
+                card.appendChild(body);
+                wrap.appendChild(card);
+
+                codeCounter++;
+              }
+            }
           } else {
-            const c = document.createElement('div'); c.className = 'content'; c.textContent = m.text; wrap.appendChild(c);
+            // plain message without any triple-backtick blocks
+            const txtClean = trimNewlines(m.text);
+            if (txtClean && txtClean.trim()) {
+              const c = document.createElement('div'); c.className = 'content'; c.textContent = txtClean; wrap.appendChild(c);
+            }
             if (m.sender === 'bot' && m.ts) {
               const ts = document.createElement('div'); ts.className = 'timestamp';
               const diff = Math.floor((Date.now() - m.ts) / 1000);
@@ -277,15 +360,10 @@
         }
         chatBox.appendChild(wrap);
       });
-      // ensure scroll stays at bottom inside chat-box
       scrollToBottom();
     }
 
-    // -------------------------
-    // Paste => immediate send (no maxlength)
-    // -------------------------
     textarea.addEventListener('paste', (e)=>{
-      // allow default paste then submit shortly after so textarea is populated
       setTimeout(()=> {
         const val = textarea.value;
         if (!val || !val.trim()) return;
@@ -294,9 +372,7 @@
       }, 20);
     });
 
-    // -------------------------
-    // Utility: robust extraction of assistant text from server response
-    // -------------------------
+    // robust extractor (unchanged)
     function collectStrings(value) {
       if (value == null) return '';
       if (typeof value === 'string') return value;
@@ -332,45 +408,28 @@
       return null;
     }
 
-    // -------------------------
-    // Remove timestamps from UI (requirement #3)
-    // -------------------------
     function removeAllTimestamps() {
       const ts = chatBox.querySelectorAll('.timestamp');
       ts.forEach(el => el.remove());
     }
 
-    // -------------------------
-    // Submit flow: ALWAYS produce a bot reply (network fallback handled)
-    // -------------------------
     chatForm.addEventListener('submit', async (e) => {
       e.preventDefault();
       const raw = textarea.value;
       const text = (typeof raw === 'string') ? raw.trim() : '';
       if (!text) return;
-
-      // Requirement 3: remove timestamps when user sends next message
       removeAllTimestamps();
-
       if (currentSession === null) newChat();
       const sess = sessions[currentSession];
-
-      // push user locally
       sess.messages.push({ sender: 'user', text, ts: Date.now() });
       if (sess.messages[0] && typeof sess.messages[0].text === 'string') sess.title = sess.messages[0].text.slice(0,100);
       save(); renderList(); renderBox();
-
-      // clear input so user can continue pasting
       textarea.value = '';
-
-      // add thinking bubble
       const thinking = { sender: 'thinking', ts: Date.now() };
       sess.messages.push(thinking); save(); renderBox();
-
       let assistantPushed = false;
 
       try {
-        // ensure user exists
         let tfid = localStorage.getItem('tfid');
         if (!tfid) {
           const ru = await fetch('/user', { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({}) });
@@ -378,7 +437,6 @@
           const ju = await ru.json(); tfid = ju.tfid; localStorage.setItem('tfid', tfid);
         }
 
-        // ensure session exists
         let sessionId = localStorage.getItem('currentSessionId');
         if (!sessionId) {
           const rs = await fetch('/session', { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({ tfid }) });
@@ -386,7 +444,6 @@
           const js = await rs.json(); sessionId = js.sessionId; localStorage.setItem('currentSessionId', sessionId);
         }
 
-        // call /message
         const r = await fetch('/message', {
           method: 'POST',
           headers: {'Content-Type':'application/json'},
@@ -400,10 +457,8 @@
         }
 
         const jr = await r.json();
-        // remove thinking bubble locally
         const idx = sess.messages.indexOf(thinking); if (idx > -1) sess.messages.splice(idx, 1);
 
-        // extract assistant text robustly
         let assistantText = null;
         if (jr && typeof jr.assistant === 'string' && jr.assistant.trim()) assistantText = jr.assistant.trim();
         if (!assistantText && jr && jr.raw) assistantText = extractAssistantTextFromResp(jr.raw);
@@ -422,13 +477,10 @@
       } catch (err) {
         console.warn('Error sending message or parsing response, will fallback. Err:', err && err.message ? err.message : err);
       } finally {
-        // ensure thinking removed
         try {
           const idx2 = sess.messages.findIndex(m => m.sender === 'thinking');
           if (idx2 !== -1) sess.messages.splice(idx2, 1);
         } catch(e){}
-
-        // if no assistant message was added, add fallback now
         const lastBot = [...sess.messages].reverse().find(m => m.sender === 'bot');
         if (!lastBot) {
           sess.messages.push({
@@ -438,10 +490,9 @@
           });
         }
         save(); renderBox();
-      } // end try/catch/finally
-    }); // end submit handler
+      }
+    });
 
-    // Enter + no Shift => insert newline (keep this behavior)
     textarea.addEventListener('keydown', (e)=>{
       if (e.key === 'Enter' && !e.shiftKey) {
         e.preventDefault();
@@ -451,7 +502,6 @@
       }
     });
 
-    // On load: render saved sessions
     if (sessions.length) { renderList(); renderBox(); }
     adjustLayoutForViewport();
 
@@ -471,5 +521,5 @@
       }
     });
   </script>
- </body>
-</html>
+</body>
+  </html>
