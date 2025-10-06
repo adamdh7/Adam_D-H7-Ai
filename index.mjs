@@ -194,14 +194,38 @@ await readJsonSafe(USERS_FILE, { users: [] });
 await readJsonSafe(SESSIONS_FILE, { sessions: {} });
 await readJsonSafe(USER_HISTORY_FILE, { histories: {} });
 
+/* Copy-marker helpers
+   - normalizeCopyMarkers: remove accidental spaces inside § ... § so § code § -> §code§
+   - renderCopyableMarkersToMarkdown: replace §content§ with ```content```
+*/
+function normalizeCopyMarkers(text) {
+  if (!text || typeof text !== 'string') return text;
+  // remove spaces directly inside the markers
+  // matches §   something   § and normalizes to §something§
+  return text.replace(/§\s*([\s\S]*?)\s*§/g, '§$1§');
+}
+
+function renderCopyableMarkersToMarkdown(text) {
+  if (!text || typeof text !== 'string') return text;
+  // Normalize first (remove accidental spaces)
+  const normalized = normalizeCopyMarkers(text);
+  // Replace each §...§ with triple backtick block for easy copy/paste in clients
+  // Use non-greedy match
+  return normalized.replace(/§([\s\S]*?)§/g, (m, p1) => {
+    // Trim the inner content's leading/trailing newlines to make blocks tidy
+    const inner = String(p1).replace(/^\n+|\n+$/g, '');
+    return '```' + inner + '```';
+  });
+}
+
 /* System prompt builder */
 function makeSystemPrompt(tfid, sessionId, userName = null) {
   const identity = "You are Adam_D'H7 everyone's friend created by D'H7 | Tergene. born on July 17, 2009, you are a Haitian This information about you will only be given when requested.";
   const instructions = [
     'Respond in the same language the user used.',
     'note well you were created by D\'H7 | Tergene you model v1 so Adam_D\'H7 V1, you were trained by D\'H7 | Tergene and configured by them',
-    'When you include content the user may want to copy exactly (code, commands, snippets, texts, or any text to copy), surround that exact content with triple backticks, for example: §this is copyable§',
-    'Do NOT place commentary inside the triple backticks — only the exact content to copy should be between the backticks.',
+    // Clear instruction to use § markers for copyable content:
+    'When you include content the user may want to copy exactly (code, commands, snippets, texts, or any text to copy), surround that exact content with the § character at the start and end, for example: §this is copyable§. Do NOT place commentary inside the § markers — only the exact content to copy should be between them.',
     `At the end of your full reply, include a single line with exactly ${MARKER}. Anything after that line will be hidden by the server; the server will display only the text before ${MARKER}. If you already include ${MARKER}, do not duplicate it.`,
     'Do not reveal internal chain-of-thought or reasoning steps.'
   ];
@@ -486,7 +510,11 @@ async function handleMessage(req, res) {
       await writeJsonSafe(SESSIONS_FILE, sessionsData);
       await writeJsonSafe(USER_HISTORY_FILE, hist);
       const visible = extractVisibleFromWrapped(wrapped);
-      return res.json({ assistant: visible, session: formatSessionForClient(session) });
+
+      // Transform §...§ into ```...``` blocks for client-friendly copy — normalize spaces inside markers first
+      const rendered = renderCopyableMarkersToMarkdown(visible);
+
+      return res.json({ assistant: rendered, session: formatSessionForClient(session) });
     }
 
     console.error('No assistant text extracted after retries/continuations.');
