@@ -36,6 +36,7 @@
       background:var(--panel); height:var(--header-h); display:flex; align-items:center; justify-content:center;
       position:fixed; top:0; left:0; right:0; z-index:999; padding:0 12px; user-select:none;
       box-shadow:0 1px 0 rgba(255,255,255,0.02) inset;
+      transition: top 120ms ease;
     }
     .menu-btn{position:absolute;left:12px;font-size:22px;cursor:pointer;color:var(--ai-text)}
     .name-title{font-weight:800;color:var(--name-gray);font-size:20px;letter-spacing:0.2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
@@ -44,7 +45,10 @@
       position:fixed; left:0; right:0; top:var(--header-h); bottom:var(--form-h);
       display:flex; flex-direction:column; padding:12px 18px; overflow-y:auto; background:var(--panel);
       box-sizing:border-box; -webkit-overflow-scrolling:touch;
+      /* hide scrollbar visually but keep scrolling functionality */
+      scrollbar-width: none; -ms-overflow-style: none;
     }
+    .chat-box::-webkit-scrollbar { display: none; width:0; height:0; }
 
     /* Reduced spacing to avoid extra "enter" lines */
     .message{ margin:6px 0; max-width:76%; position:relative; overflow-wrap:anywhere; word-break:break-word; white-space:pre-wrap; }
@@ -90,7 +94,7 @@
       font-size:13px;
       color:var(--ai-text);
     }
-    .code-header .label{ display:flex; align-items:center; gap:8px; font-weight:600; color:var(--ai-text); }
+    .code-header .label{ display:flex; align-items:center; gap:8px; font-weight:600; color:var(--ai-text); cursor:pointer; }
     .code-body{
       background:#060606;
       padding:8px 12px;
@@ -130,6 +134,14 @@
       .chat-box{ padding:12px; padding-top: calc(var(--header-h) + 8px); padding-bottom: calc(var(--form-h) + 8px) }
       header{ font-size:18px }
     }
+
+    /* small helper for "scroll to bottom" badge (optional) */
+    .scroll-bottom-badge{
+      position:fixed; right:16px; bottom:calc(var(--form-h) + 16px); z-index:900;
+      background:rgba(7,26,51,0.9); color:#fff; padding:8px 10px; border-radius:20px; cursor:pointer; display:none;
+      font-size:13px;
+    }
+    .scroll-bottom-badge.show{ display:block; }
   </style>
 </head>
 <body>
@@ -146,7 +158,9 @@
     <ul class="chat-list" id="chatList"></ul>
   </div>
 
-  <div class="chat-box" id="chatBox" tabindex="-1" aria-live="polite"></div>
+  <div class="chat-box" id="chatBox" tabindex="0" aria-live="polite"></div>
+
+  <div class="scroll-bottom-badge" id="scrollBadge" title="Aller au bas">Aller au bas</div>
 
   <form id="chatForm" autocomplete="off" novalidate>
     <textarea id="userInput" placeholder="Adam_D'H7 le meilleure assistant" aria-label="Message"></textarea>
@@ -160,10 +174,12 @@
   <script>
     // Helpers + layout
     const headerEl = document.querySelector('header');
+    const headerNameEl = document.getElementById('headerName');
     const chatBox = document.getElementById('chatBox');
     const formEl = document.querySelector('form');
     const textarea = document.getElementById('userInput');
     const chatForm = document.getElementById('chatForm');
+    const scrollBadge = document.getElementById('scrollBadge');
 
     function scrollToBottom(immediate = true) {
       try {
@@ -178,7 +194,9 @@
       chatBox.style.top = headerH + 'px';
       chatBox.style.bottom = formH + 'px';
       chatBox.style.paddingTop = '12px';
-      setTimeout(()=> scrollToBottom(true), 60);
+      setTimeout(()=> {
+        if (!userIsScrolling) scrollToBottom(true);
+      }, 60);
     }
 
     window.addEventListener('load', ()=>{ adjustLayoutForViewport(); });
@@ -186,14 +204,15 @@
 
     textarea.addEventListener('focus', ()=>{
       setTimeout(()=> adjustLayoutForViewport(), 80);
-      setTimeout(()=> scrollToBottom(true), 150);
+      setTimeout(()=> { if (!userIsScrolling) scrollToBottom(true); }, 150);
+      // keep header visible on mobile keyboards via visualViewport handler (below)
     });
     textarea.addEventListener('blur', ()=>{ setTimeout(()=> adjustLayoutForViewport(), 80); });
-    textarea.addEventListener('input', ()=>{ scrollToBottom(true); });
+    textarea.addEventListener('input', ()=>{ if (!userIsScrolling) scrollToBottom(true); });
 
     window.addEventListener('gesturestart', e => e.preventDefault());
 
-    if(!document.getElementById('headerName').textContent.trim()) document.getElementById('headerName').textContent = "Adam_D'H7";
+    if(!headerNameEl.textContent.trim()) headerNameEl.textContent = "Adam_D'H7";
     if (typeof Notification !== 'undefined' && Notification && Notification.permission !== 'granted') Notification.requestPermission();
 
     const STORAGE_KEY = 'tfai_sessions';
@@ -227,43 +246,54 @@
       return str.replace(/^\n+|\n+$/g, '');
     }
 
-    /* copy only code content (inside ```), nothing else */
-    async function copyCode(msgIndex, codeIndex) {
+    /* copy only code content (inside code card) - improved:
+       - clicking icon or clicking the label header copies code
+       - uses delegated events too
+    */
+    async function copyCodeFromCard(cardEl) {
       try {
-        const sess = sessions[currentSession];
-        if (!sess) return;
-        const m = sess.messages[msgIndex];
-        if (!m || typeof m.text !== 'string') return;
-
-        const parts = m.text.split(/```/);
-        // code blocks are at odd indices
-        let cc = 0, codeContent = null;
-        for (let i = 0; i < parts.length; i++) {
-          if (i % 2 === 1) {
-            if (cc === codeIndex) { codeContent = trimNewlines(parts[i]); break; }
-            cc++;
-          }
-        }
-        if (codeContent === null) return;
-
-        // write only the code content to clipboard
+        if (!cardEl) return;
+        const body = cardEl.querySelector('.code-body');
+        if (!body) return;
+        const codeContent = body.textContent || '';
+        if (!codeContent) return;
         await navigator.clipboard.writeText(codeContent);
 
-        // visual feedback on the specific button
-        const el = chatBox.querySelector(`.code-card[data-msg-idx="${msgIndex}"][data-code-idx="${codeIndex}"]`);
-        if (el) {
-          const btn = el.querySelector('.code-copy-btn');
-          if (btn) {
-            const prevHtml = btn.innerHTML;
-            btn.innerHTML = '<svg class="code-copy-icon" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true"><path d="M9 12l2 2 4-4" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>';
-            setTimeout(()=> { try { btn.innerHTML = prevHtml; } catch(e){} }, 1200);
-          }
+        // visual feedback on button if present
+        const btn = cardEl.querySelector('.code-copy-btn');
+        if (btn) {
+          const prevHtml = btn.innerHTML;
+          btn.innerHTML = '<svg class="code-copy-icon" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true"><path d="M9 12l2 2 4-4" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>';
+          setTimeout(()=> { try { btn.innerHTML = prevHtml; } catch(e){} }, 1200);
         }
-
       } catch (e) {
-        console.warn('copyCode fail', e);
+        console.warn('copyCodeFromCard fail', e);
       }
     }
+
+    // Delegated click: copy when clicking the button, icon, or the left label area
+    document.addEventListener('click', (ev) => {
+      const btn = ev.target.closest('.code-copy-btn');
+      if (btn) {
+        const card = btn.closest('.code-card');
+        if (card) copyCodeFromCard(card);
+        return;
+      }
+      // If user clicks icon inside
+      const icon = ev.target.closest('.code-copy-icon');
+      if (icon) {
+        const card = icon.closest('.code-card');
+        if (card) copyCodeFromCard(card);
+        return;
+      }
+      // If user clicks the label (left side) copy too (convenience)
+      const lbl = ev.target.closest('.code-header .label');
+      if (lbl) {
+        const card = lbl.closest('.code-card');
+        if (card) copyCodeFromCard(card);
+        return;
+      }
+    });
 
     function renderBox(){
       chatBox.innerHTML = '';
@@ -283,7 +313,7 @@
         } else {
           wrap.className = 'message ' + (m.sender === 'user' ? 'user' : 'bot');
 
-          // If message contains any ``` code blocks, split and render segments in order
+          // If message contains any § code markers
           if (typeof m.text === 'string' && m.text.includes('§')) {
             const parts = m.text.split(/§/);
             let codeCounter = 0;
@@ -299,7 +329,7 @@
                   wrap.appendChild(p);
                 }
               } else {
-                // code segment -> create a code card, with data attributes for lookup
+                // code segment -> create a code card
                 const rawCode = parts[i];
                 const codeText = trimNewlines(rawCode);
 
@@ -313,7 +343,7 @@
 
                 const left = document.createElement('div');
                 left.className = 'label';
-                left.innerHTML = '<svg style="width:14px;height:14px;opacity:0.9;margin-right:4px" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M9 12l2 2 4-4" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg><span> </span>';
+                left.innerHTML = '<svg style="width:14px;height:14px;opacity:0.9;margin-right:4px" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M9 12l2 2 4-4" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg><span>Copier</span>';
 
                 const right = document.createElement('div');
                 right.className = 'right';
@@ -323,11 +353,6 @@
                 btn.title = 'Copier le code';
                 btn.type = 'button';
                 btn.innerHTML = '<svg class="code-copy-icon" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true"><path d="M16 3H7a2 2 0 0 0-2 2v11" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/><rect x="9" y="7" width="11" height="11" rx="2" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>';
-
-                // closure to capture idx and codeCounter
-                (function(msgIdx, cIdx){
-                  btn.onclick = ()=> copyCode(msgIdx, cIdx);
-                })(idx, codeCounter);
 
                 right.appendChild(btn);
                 header.appendChild(left);
@@ -345,7 +370,7 @@
               }
             }
           } else {
-            // plain message without any triple-backtick blocks
+            // plain message without any markers
             const txtClean = trimNewlines(m.text);
             if (txtClean && txtClean.trim()) {
               const c = document.createElement('div'); c.className = 'content'; c.textContent = txtClean; wrap.appendChild(c);
@@ -360,8 +385,26 @@
         }
         chatBox.appendChild(wrap);
       });
-      scrollToBottom();
+
+      // Auto-scroll only if user IS NOT actively scrolling
+      if (!userIsScrolling) {
+        scrollToBottom();
+      } else {
+        // show "go to bottom" badge
+        if (chatBox.scrollHeight - chatBox.scrollTop - chatBox.clientHeight > 80) {
+          scrollBadge.classList.add('show');
+        } else {
+          scrollBadge.classList.remove('show');
+        }
+      }
     }
+
+    // When user clicks badge, jump to bottom and re-enable auto-scroll
+    scrollBadge.addEventListener('click', () => {
+      scrollBadge.classList.remove('show');
+      userIsScrolling = false;
+      scrollToBottom(false);
+    });
 
     textarea.addEventListener('paste', (e)=>{
       setTimeout(()=> {
@@ -413,6 +456,68 @@
       ts.forEach(el => el.remove());
     }
 
+    // track user-initiated scrolling so we don't auto-jump
+    let userIsScrolling = false;
+    let userScrollTimeout = null;
+    chatBox.addEventListener('scroll', (ev) => {
+      // if user manually scrolls (wheel/touch/keyboard) mark flag
+      // we consider it user scroll when not programmatic (there's no perfect detection API)
+      userIsScrolling = true;
+      scrollBadge.classList.add('show');
+
+      // hide badge if near bottom
+      const remaining = chatBox.scrollHeight - chatBox.scrollTop - chatBox.clientHeight;
+      if (remaining < 80) {
+        userIsScrolling = false;
+        scrollBadge.classList.remove('show');
+      }
+
+      // reset timeout to consider user stopped after 1.2s
+      if (userScrollTimeout) clearTimeout(userScrollTimeout);
+      userScrollTimeout = setTimeout(()=> {
+        // if user at bottom, re-enable auto-scroll
+        const rem = chatBox.scrollHeight - chatBox.scrollTop - chatBox.clientHeight;
+        if (rem < 80) {
+          userIsScrolling = false;
+          scrollBadge.classList.remove('show');
+        }
+      }, 1200);
+    }, { passive: true });
+
+    // Keyboard scrolling when textarea is NOT focused
+    document.addEventListener('keydown', (e) => {
+      // if focus is in textarea, ignore (so user can type normally)
+      const active = document.activeElement;
+      if (active === textarea || active && active.tagName === 'INPUT' ) return;
+
+      const key = e.key;
+      let handled = false;
+      if (key === 'ArrowDown') {
+        chatBox.scrollBy({ top: 60, behavior: 'smooth' });
+        handled = true;
+      } else if (key === 'ArrowUp') {
+        chatBox.scrollBy({ top: -60, behavior: 'smooth' });
+        handled = true;
+      } else if (key === 'PageDown') {
+        chatBox.scrollBy({ top: chatBox.clientHeight * 0.9, behavior: 'smooth' });
+        handled = true;
+      } else if (key === 'PageUp') {
+        chatBox.scrollBy({ top: -chatBox.clientHeight * 0.9, behavior: 'smooth' });
+        handled = true;
+      } else if (key === 'Home') {
+        chatBox.scrollTo({ top: 0, behavior: 'smooth' });
+        handled = true;
+      } else if (key === 'End') {
+        chatBox.scrollTo({ top: chatBox.scrollHeight, behavior: 'smooth' });
+        handled = true;
+      }
+      if (handled) {
+        e.preventDefault();
+        userIsScrolling = true;
+        scrollBadge.classList.add('show');
+      }
+    });
+
     chatForm.addEventListener('submit', async (e) => {
       e.preventDefault();
       const raw = textarea.value;
@@ -461,6 +566,7 @@
 
         let assistantText = null;
         if (jr && typeof jr.assistant === 'string' && jr.assistant.trim()) assistantText = jr.assistant.trim();
+        if (!assistantText && jr && jr.assistant_rendered) assistantText = jr.assistant_rendered;
         if (!assistantText && jr && jr.raw) assistantText = extractAssistantTextFromResp(jr.raw);
         if (!assistantText && jr) assistantText = extractAssistantTextFromResp(jr);
 
@@ -470,6 +576,7 @@
         assistantPushed = true;
         save(); renderBox();
 
+        // If user not looking at page, show notification
         if (typeof document !== 'undefined' && document.hidden && typeof Notification !== 'undefined' && Notification.permission === 'granted') {
           new Notification("Adam_D'H7", { body: 'Nouvo mesaj TF-Chat' });
         }
@@ -493,8 +600,10 @@
       }
     });
 
+    // Make Enter insert newline normally (so user can line-break). Keep previous custom behaviour: Enter -> newline
     textarea.addEventListener('keydown', (e)=>{
       if (e.key === 'Enter' && !e.shiftKey) {
+        // previously prevented submit; keep newline behaviour
         e.preventDefault();
         const s = textarea.selectionStart, v = textarea.value;
         textarea.value = v.slice(0,s) + '\n' + v.slice(s);
@@ -505,6 +614,32 @@
     if (sessions.length) { renderList(); renderBox(); }
     adjustLayoutForViewport();
 
+    // Keep header visible when mobile keyboard opens using visualViewport
+    if (window.visualViewport) {
+      const onViewportChange = () => {
+        const vv = window.visualViewport;
+        // move header down to remain visible (some mobile browsers change offsetTop)
+        headerEl.style.top = (vv.offsetTop || 0) + 'px';
+
+        // Calculate keyboard overlap and adjust chatBox bottom so form sits above keyboard
+        const keyboardHeight = window.innerHeight - vv.height - (vv.offsetTop || 0);
+        const formH = formEl.offsetHeight || 84;
+        const bottomPad = Math.max(formH, formH + keyboardHeight);
+        chatBox.style.bottom = bottomPad + 'px';
+
+        // if textarea is focused, ensure we keep bottom in view
+        if (document.activeElement === textarea) {
+          setTimeout(()=> {
+            if (!userIsScrolling) scrollToBottom(true);
+          }, 100);
+        }
+      };
+      window.visualViewport.addEventListener('resize', onViewportChange);
+      window.visualViewport.addEventListener('scroll', onViewportChange);
+      window.addEventListener('resize', onViewportChange);
+    }
+
+    // service worker registration kept as before
     window.addEventListener('load', () => {
       if ('serviceWorker' in navigator) {
         navigator.serviceWorker.register('/sw.js', { scope: '/' })
@@ -522,4 +657,4 @@
     });
   </script>
 </body>
-  </html>
+      </html>
