@@ -1,3 +1,4 @@
+// index.mjs
 import express from 'express';
 import cors from 'cors';
 import path from 'path';
@@ -22,9 +23,12 @@ const GOOGLE_API_KEY = process.env.GOOGLE_API_KEY || '';
 const GOOGLE_BASE = process.env.GOOGLE_BASE || 'https://generativelanguage.googleapis.com';
 const GOOGLE_MODEL = process.env.GOOGLE_MODEL || 'gemini-2.0-flash';
 
+/* NOTE: on some deployments you may not have a Google key (for local testing).
+   If you *require* the provider, keep the exit below; otherwise you can comment it out.
+*/
 if (!GOOGLE_API_KEY) {
-  console.error('ERROR: GOOGLE_API_KEY missing in .env — set GOOGLE_API_KEY and restart.');
-  process.exit(1);
+  console.error('WARN: GOOGLE_API_KEY not set. Provider calls will fail unless you set GOOGLE_API_KEY.');
+  // process.exit(1);
 }
 
 /* Other config */
@@ -113,11 +117,12 @@ async function readJsonSafe(filePath, defaultValue) {
     const raw = await fs.readFile(filePath, 'utf8');
     return JSON.parse(raw);
   } catch (err) {
+    // If missing, create default
     if (err && err.code === 'ENOENT') {
       try { await fs.writeFile(filePath, JSON.stringify(defaultValue, null, 2), 'utf8'); } catch (e) {}
       return defaultValue;
     }
-    // If file exists but invalid JSON, rename to .broken and return default
+    // If broken JSON, rename and recreate default
     if (err && (err.name === 'SyntaxError' || /Unexpected token/.test(String(err)))) {
       try { await fs.rename(filePath, filePath + '.broken.' + Date.now()); } catch (e) {}
       try { await fs.writeFile(filePath, JSON.stringify(defaultValue, null, 2), 'utf8'); } catch (e) {}
@@ -256,7 +261,7 @@ async function fetchWithTimeout(url, options = {}, timeoutMs = DEFAULT_TIMEOUT_M
   }
 }
 
-/* Init storage files */
+/* Init storage files (ensure they exist and aren't corrupted) */
 await readJsonSafe(USERS_FILE, { users: [] });
 await readJsonSafe(SESSIONS_FILE, { sessions: {} });
 await readJsonSafe(USER_HISTORY_FILE, { histories: {} });
@@ -302,19 +307,6 @@ function formatSessionForClient(sessionObj) {
     })
   };
   return out;
-}
-
-/* Ensure session exists helper (used for auto-recreate when storage reset) */
-async function ensureSessionExists(sessionsData, sessionId, tfid, title = 'Recovered Chat') {
-  sessionsData.sessions = sessionsData.sessions || {};
-  let session = sessionsData.sessions[sessionId];
-  if (!session) {
-    session = { sessionId, tfid, title: title || 'Nouveau Chat', createdAt: new Date().toISOString(), messages: [] };
-    sessionsData.sessions[sessionId] = session;
-    try { await writeJsonSafe(SESSIONS_FILE, sessionsData); } catch (e) { logger.error(null, tfid, sessionId, `Failed to persist recreated session: ${String(e)}`); }
-    logger.warn(null, tfid, sessionId, `Session ${sessionId} not found; created recovered session for tfid=${tfid}`);
-  }
-  return session;
 }
 
 /* Routes */
@@ -364,7 +356,6 @@ app.post('/session', async (req, res) => {
   }
 });
 
-// Get single session (client can check if exists)
 app.get('/session/:sessionId', async (req, res) => {
   try {
     const sessionId = req.params.sessionId;
@@ -407,33 +398,65 @@ app.get('/history/:tfid/:n?', async (req, res) => {
   }
 });
 
-/* Core handler using Google generateContent */
+/* Core handler using Google generateContent
+   Robust behavior requested: if tfid is missing/invalid, auto-create user;
+   if sessionId missing/invalid, auto-create session.
+   Response will include current tfid and session (so frontend can update localStorage).
+*/
 async function handleMessage(req, res) {
   try {
-    const { tfid, sessionId } = req.body || {};
-    let text = req.body?.text;
-    if (!tfid || !sessionId || typeof text !== 'string' || !text.trim()) {
-      return res.status(400).json({ error: 'tfid_session_text_required' });
+    logger.info(req.requestId, null, null, `DEBUG /message body raw: ${JSON.stringify(req.body)}`);
+
+    let tfid = req.body?.tfid;
+    let sessionId = req.body?.sessionId;
+    let text = req.body?.text || req.body?.prompt;
+
+    if (!text || typeof text !== 'string' || !text.trim()) {
+      return res.status(400).json({ error: 'text_required' });
     }
     const clean = String(text).trim();
 
-    const users = await readJsonSafe(USERS_FILE, { users: [] });
-    const user = (users.users || []).find(u => u.tfid === tfid);
-    if (!user) return res.status(404).json({ error: 'user_not_found' });
+    // Ensure users file and find or create user automatically
+    const usersObj = await readJsonSafe(USERS_FILE, { users: [] });
+    usersObj.users = usersObj.users || [];
+    let user = tfid ? (usersObj.users.find(u => u.tfid === tfid)) : null;
 
-    const sessionsData = await readJsonSafe(SESSIONS_FILE, { sessions: {} });
-    sessionsData.sessions = sessionsData.sessions || {};
-    // If session is missing (e.g., Render restarted and cleared tmp storage), create it automatically
-    let session = sessionsData.sessions[sessionId];
-    if (!session) {
-      logger.warn(req.requestId, tfid, sessionId, `Session not found in storage — creating recovered session.`);
-      session = { sessionId, tfid, title: 'Recovered Chat', createdAt: new Date().toISOString(), messages: [] };
-      sessionsData.sessions[sessionId] = session;
-      try { await writeJsonSafe(SESSIONS_FILE, sessionsData); } catch (e) { logger.error(req.requestId, tfid, sessionId, `Failed to persist recreated session: ${String(e)}`); }
+    if (!user) {
+      // create a new user automatically
+      const newTF = await ensureUniqueTFID();
+      user = { tfid: newTF, name: DEFAULT_USER_NAME, createdAt: new Date().toISOString() };
+      usersObj.users.push(user);
+      try { await writeJsonSafe(USERS_FILE, usersObj); } catch (e) { logger.error(req.requestId, null, null, `Failed writing user.json: ${String(e)}`); }
+      logger.warn(req.requestId, tfid, sessionId, `tfid missing/invalid; created new user ${newTF}`);
+      tfid = newTF; // adopt new tfid for the rest of handling
     }
 
-    if (session.tfid !== tfid) return res.status(403).json({ error: 'session_belongs_to_other_user' });
+    // Ensure sessions file and find or create session automatically
+    const sessionsData = await readJsonSafe(SESSIONS_FILE, { sessions: {} });
+    sessionsData.sessions = sessionsData.sessions || {};
+    let session = sessionId ? sessionsData.sessions[sessionId] : null;
 
+    if (!session) {
+      // If client provided sessionId but it's not found, create a session with that id to preserve reference
+      const createId = sessionId || crypto.randomUUID();
+      session = { sessionId: createId, tfid, title: 'Recovered Chat', createdAt: new Date().toISOString(), messages: [] };
+      sessionsData.sessions[createId] = session;
+      try { await writeJsonSafe(SESSIONS_FILE, sessionsData); } catch (e) { logger.error(req.requestId, tfid, createId, `Failed writing sessions.json: ${String(e)}`); }
+      logger.warn(req.requestId, tfid, createId, `session missing/invalid; created session ${createId} for tfid=${tfid}`);
+      sessionId = createId;
+    }
+
+    if (session.tfid !== tfid) {
+      // If there's a mismatch, recreate a session for this tfid (do not overwrite other user's session)
+      const newSessionId = crypto.randomUUID();
+      session = { sessionId: newSessionId, tfid, title: 'Recovered Chat', createdAt: new Date().toISOString(), messages: [] };
+      sessionsData.sessions[newSessionId] = session;
+      sessionId = newSessionId;
+      try { await writeJsonSafe(SESSIONS_FILE, sessionsData); } catch (e) { logger.error(req.requestId, tfid, sessionId, `Failed writing sessions.json: ${String(e)}`); }
+      logger.warn(req.requestId, tfid, sessionId, `session belonged to another user; created session ${newSessionId} for tfid=${tfid}`);
+    }
+
+    // Push user message to session and to history
     session.messages = session.messages || [];
     session.messages.push({ role: 'user', content: clean, ts: Date.now() });
 
@@ -442,9 +465,19 @@ async function handleMessage(req, res) {
     hist.histories[tfid] = hist.histories[tfid] || [];
     hist.histories[tfid].push({ role: 'user', content: clean, sessionId, ts: Date.now() });
 
-    await writeJsonSafe(SESSIONS_FILE, sessionsData);
-    await writeJsonSafe(USER_HISTORY_FILE, hist);
+    // Persist session and history (and users already persisted earlier)
+    try {
+      await writeJsonSafe(SESSIONS_FILE, sessionsData);
+    } catch (e) {
+      logger.error(req.requestId, tfid, sessionId, `Failed to persist sessions: ${String(e)}`);
+    }
+    try {
+      await writeJsonSafe(USER_HISTORY_FILE, hist);
+    } catch (e) {
+      logger.error(req.requestId, tfid, sessionId, `Failed to persist user_history: ${String(e)}`);
+    }
 
+    // Build prompt & handle provider logic (kept similar to earlier implementation)
     const systemMsg = makeSystemPrompt(tfid, sessionId, user.name || DEFAULT_USER_NAME);
     let tail = (session.messages || []).slice(-HISTORY_TAIL).map(m => ({ role: m.role, content: m.content || '' }));
 
@@ -457,7 +490,6 @@ async function handleMessage(req, res) {
 
     let promptTokens = estimatePromptTokens(systemMsg, tail, clean);
 
-    // Correct trimming logic: reserve allowed response tokens, compute max prompt tokens
     const allowedResponseTokens = Math.min(DEFAULT_MAX_TOKENS, MAX_ALLOWED_TOKENS);
     const maxPromptTokens = Math.max(0, MAX_CONTEXT_TOKENS - allowedResponseTokens);
 
@@ -499,14 +531,26 @@ async function handleMessage(req, res) {
     const MAX_BACKOFF_MS = 16000;
     const EXTRA_TIMEOUT_PER_ATTEMPT = 2000;
 
+    // If there's no provider key, skip calling provider and respond with a helpful message.
+    if (!GOOGLE_API_KEY) {
+      const fallback = ensureMarkerBefore(`Le serveur ne trouve pas de clé de fournisseur (GOOGLE_API_KEY). Réponse de test : Bonjour ! Je suis le serveur en mode dégradé. ${MARKER}`);
+      session.messages.push({ role: 'assistant', content: fallback, ts: Date.now() });
+      hist.histories[tfid].push({ role: 'assistant', content: fallback, sessionId, ts: Date.now() });
+      try { await writeJsonSafe(SESSIONS_FILE, sessionsData); } catch (e) {}
+      try { await writeJsonSafe(USER_HISTORY_FILE, hist); } catch (e) {}
+      const visible = extractVisibleFromWrapped(fallback);
+      const normalized = normalizeCopyMarkers(visible).replace(/```(?:[a-zA-Z0-9]+\n)?([\s\S]*?)```/g, (m, p1) => { const inner = String(p1).replace(/^\n+|\n+$/g, ''); return '§' + inner + '§'; });
+      const rendered = renderCopyableMarkersToMarkdown(normalized);
+      return res.json({ tfid, session: formatSessionForClient(session), assistant: normalized, assistant_rendered: rendered });
+    }
+
+    // Provider call loop
     while (attempt < MAX_RETRIES) {
       attempt++;
       const attemptStart = Date.now();
       const attemptTimeout = DEFAULT_TIMEOUT_MS + (attempt - 1) * EXTRA_TIMEOUT_PER_ATTEMPT;
 
-      // Build Google generateContent payload
       const promptText = messagesForProvider.map(m => `${m.role || 'user'}: ${String(m.content || '')}`).join('\n\n');
-
       const url = `${GOOGLE_BASE}/v1beta/models/${GOOGLE_MODEL}:generateContent?key=${GOOGLE_API_KEY}`;
 
       const payload = {
@@ -544,7 +588,7 @@ async function handleMessage(req, res) {
         logger.info(req.requestId, tfid, sessionId, `provider body preview: ${preview}${lastResp.text.length > 800 ? '...[truncated]' : ''}`);
       }
 
-      // Network-level error (fetch failed)
+      // Network-level error
       if (!lastResp.ok && lastResp.fetchError) {
         logger.warn(req.requestId, tfid, sessionId, `Provider network error (attempt ${attempt}): ${String(lastResp.fetchError)}`);
         if (attempt < MAX_RETRIES) {
@@ -559,11 +603,8 @@ async function handleMessage(req, res) {
         }
       }
 
-      // Non-OK HTTP status handling (including 429)
       if (!lastResp.ok) {
         logger.warn(req.requestId, tfid, sessionId, `Provider returned status ${lastResp.status} (attempt ${attempt}).`);
-
-        // If provider provided Retry-After header, use it
         const retryAfterSec = lastResp.headers?.['retry-after'] ? Number(lastResp.headers['retry-after']) : null;
 
         if (lastResp.status === 429 && attempt < MAX_RETRIES) {
@@ -629,40 +670,36 @@ async function handleMessage(req, res) {
         assistantText = accumulated || null;
         break;
       }
-    } // end attempts loop
+    } // end provider attempts
 
     if (assistantText) {
-      // Wrap with server marker if not present
       const wrapped = ensureMarkerBefore(assistantText);
 
       // store wrapped in session/history (raw from model)
       session.messages.push({ role: 'assistant', content: wrapped, ts: Date.now() });
       hist.histories[tfid].push({ role: 'assistant', content: wrapped, sessionId, ts: Date.now() });
-      await writeJsonSafe(SESSIONS_FILE, sessionsData);
-      await writeJsonSafe(USER_HISTORY_FILE, hist);
+      try { await writeJsonSafe(SESSIONS_FILE, sessionsData); } catch (e) {}
+      try { await writeJsonSafe(USER_HISTORY_FILE, hist); } catch (e) {}
 
-      // Visible part (before marker)
       let visible = extractVisibleFromWrapped(wrapped);
 
-      // 1) Normalize any accidental spaces inside § markers: § code § -> §code§
+      // Normalize and convert triple-backticks to § markers
       let normalized = normalizeCopyMarkers(visible);
-
-      // 2) If model used triple-backticks ```...``` convert them to §...§ to enforce § usage
       normalized = normalized.replace(/```(?:[a-zA-Z0-9]+\n)?([\s\S]*?)```/g, (m, p1) => {
         const inner = String(p1).replace(/^\n+|\n+$/g, '');
         return '§' + inner + '§';
       });
 
-      // 3) Prepare a rendered version (```...```) if UI wants to show it
       const rendered = renderCopyableMarkersToMarkdown(normalized);
 
       logger.info(req.requestId, tfid, sessionId, `assistantText length=${String(assistantText).length} saved to session`);
 
-      // Return RAW with § as primary field, plus optional rendered.
+      // Return tfid & session so frontend can save/update localStorage without needing to wipe anything
       return res.json({
+        tfid,
+        session: formatSessionForClient(session),
         assistant: normalized,
-        assistant_rendered: rendered,
-        session: formatSessionForClient(session)
+        assistant_rendered: rendered
       });
     }
 
@@ -705,3 +742,4 @@ if (app && app._router && app._router.stack) {
 app.listen(PORT, () => {
   logger.info(null, null, null, `Server listening on http://localhost:${PORT} (HISTORY_TAIL=${HISTORY_TAIL}, RESPONSE_MAX_TOKENS=${DEFAULT_MAX_TOKENS})`);
 });
+
