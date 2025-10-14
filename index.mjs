@@ -7,8 +7,15 @@ import dotenv from 'dotenv';
 import { promises as fs } from 'fs';
 import fsSync from 'fs';
 import crypto from 'crypto';
+import pkg from 'pg';
+import fetch from 'node-fetch';
 
 dotenv.config();
+
+// polyfill fetch si li pa disponib
+if (!globalThis.fetch) globalThis.fetch = fetch;
+
+const { Pool } = pkg;
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -89,6 +96,8 @@ const logger = {
 app.use(cors({ origin: true }));
 app.use(express.json({ limit: '1000mb' }));
 app.use(express.urlencoded({ extended: false }));
+
+// Serve public/ so frontend assets can be fetched from backend host
 app.use(express.static(path.join(__dirname, 'public')));
 
 /* Request-ID middleware */
@@ -266,6 +275,195 @@ await readJsonSafe(USERS_FILE, { users: [] });
 await readJsonSafe(SESSIONS_FILE, { sessions: {} });
 await readJsonSafe(USER_HISTORY_FILE, { histories: {} });
 
+/* ---------- Multi-DB helpers (Postgres) using Pool (safe for concurrent use) ----------
+   This section supports internal and external DATABASE_URLs (DATABASE_URL, DATABASE_URL1...).
+   It will try to write to the first available DB in rotation. If none are available it will
+   persist pending writes to a local JSON file for later replay.
+------------------------------------------------------------------------------- */
+
+const DB_POINTER_FILE = path.join(__dirname, 'db_pointer.json');
+const PENDING_DB_FILE = path.join(__dirname, 'pending_db_writes.json');
+
+async function readDbPointer() {
+  try {
+    const raw = await fs.readFile(DB_POINTER_FILE, 'utf8');
+    const j = JSON.parse(raw);
+    return Number.isInteger(j.index) ? j.index : 0;
+  } catch (e) {
+    return 0;
+  }
+}
+async function writeDbPointer(idx) {
+  try {
+    await fs.writeFile(DB_POINTER_FILE, JSON.stringify({ index: idx }), 'utf8');
+  } catch (e) {}
+}
+
+function getDatabaseUrlsFromEnv() {
+  const urls = [];
+  if (process.env.DATABASE_URL) urls.push(process.env.DATABASE_URL);
+  for (let i = 1; i <= 20; i++) {
+    const k = `DATABASE_URL${i}`;
+    if (process.env[k]) urls.push(process.env[k]);
+  }
+  return urls;
+}
+
+await readJsonSafe(PENDING_DB_FILE, { pending: [] });
+
+// PG/Pool creation helper with optional SSL
+const PG_FORCE_SSL = (process.env.PG_FORCE_SSL === 'true'); // set to "true" in env if needed
+const PG_CONN_OPTIONS = {
+  max: 5,
+  idleTimeoutMillis: 30000,
+  connectionTimeoutMillis: 10000,
+};
+
+function createPoolFromUrl(url) {
+  try {
+    const opts = { ...PG_CONN_OPTIONS, connectionString: url };
+    if (PG_FORCE_SSL) {
+      opts.ssl = { rejectUnauthorized: false };
+    }
+    const pool = new Pool(opts);
+    pool.on('error', (err) => {
+      logger.warn(null, null, null, `pg pool error: ${String(err.message||err)}`);
+    });
+    return pool;
+  } catch (e) {
+    logger.warn(null, null, null, `createPoolFromUrl failed: ${String(e.message||e)}`);
+    return null;
+  }
+}
+
+const DATABASE_URLS = getDatabaseUrlsFromEnv();
+let dbPools = DATABASE_URLS.map(u => createPoolFromUrl(u)).filter(p => p);
+
+async function ensureDbPools() {
+  const urls = getDatabaseUrlsFromEnv();
+  if (urls.length === 0) {
+    dbPools = [];
+    return;
+  }
+  dbPools = urls.map(u => createPoolFromUrl(u)).filter(p => p);
+}
+
+// ensure table exists on each pool (best-effort)
+async function ensurePoolsInitialized() {
+  if (!dbPools || dbPools.length === 0) return;
+  for (let i = 0; i < dbPools.length; i++) {
+    const pool = dbPools[i];
+    if (!pool) continue;
+    try {
+      await pool.query(`
+        CREATE TABLE IF NOT EXISTS messages (
+          id SERIAL PRIMARY KEY,
+          tfid TEXT,
+          session_id TEXT,
+          role TEXT,
+          content TEXT,
+          ts BIGINT
+        );
+      `);
+      logger.info(null, null, null, `Ensured messages table on DB idx=${i}`);
+    } catch (e) {
+      logger.warn(null, null, null, `Failed to ensure messages table on DB idx=${i}: ${String(e.message||e)}`);
+    }
+  }
+}
+await ensurePoolsInitialized();
+
+async function shutdownDbPools() {
+  for (const pool of dbPools) {
+    try { await pool.end(); } catch (e) {}
+  }
+}
+process.on('SIGINT', async () => { await shutdownDbPools(); process.exit(0); });
+process.on('SIGTERM', async () => { await shutdownDbPools(); process.exit(0); });
+
+/* Pending writes helper */
+async function appendPendingDbWrite(entry) {
+  try {
+    const pendingObj = await readJsonSafe(PENDING_DB_FILE, { pending: [] });
+    pendingObj.pending = pendingObj.pending || [];
+    pendingObj.pending.push({ ...entry, queuedAt: Date.now() });
+    await writeJsonSafe(PENDING_DB_FILE, pendingObj);
+    logger.warn(null, entry.tfid, entry.sessionId, 'Saved DB write to pending file.');
+    return { ok: true, pending: true };
+  } catch (e) {
+    logger.error(null, entry.tfid, entry.sessionId, `Failed appendPendingDbWrite: ${String(e.message||e)}`);
+    return { ok: false, reason: 'pending_write_failed' };
+  }
+}
+
+async function writeToFirstAvailableDb(entry) {
+  // refresh pools if needed
+  if (!dbPools || dbPools.length === 0) {
+    await ensureDbPools();
+  }
+  if (!dbPools || dbPools.length === 0) {
+    // no DB pools available -> save pending
+    return appendPendingDbWrite(entry);
+  }
+
+  let pointer = await readDbPointer();
+  pointer = (pointer % dbPools.length + dbPools.length) % dbPools.length;
+  const start = pointer;
+
+  for (let tries = 0; tries < dbPools.length; tries++) {
+    const idx = (start + tries) % dbPools.length;
+    const pool = dbPools[idx];
+    if (!pool) continue;
+    try {
+      await pool.query(
+        `INSERT INTO messages(tfid, session_id, role, content, ts) VALUES($1,$2,$3,$4,$5)`,
+        [entry.tfid || null, entry.sessionId || null, entry.role || null, entry.content || null, entry.ts || Date.now()]
+      );
+      await writeDbPointer(idx);
+      return { ok: true, index: idx };
+    } catch (err) {
+      logger.warn(null, entry.tfid, entry.sessionId, `DB idx=${idx} write error: ${String(err.message||err)}`);
+      continue;
+    }
+  }
+
+  // all DBs failed -> save pending
+  return appendPendingDbWrite(entry);
+}
+
+// --- Local fallback: search sessions.json / user_history.json if DBs unavailable ---
+async function findFallbackInLocalHistory(clean, sessionObj, histObj, tfid) {
+  try {
+    if (!clean) return null;
+    const snippet = clean.trim().slice(0, 40).toLowerCase();
+
+    // 1) search user's history file (user_history.json)
+    if (histObj && histObj.histories && tfid && Array.isArray(histObj.histories[tfid])) {
+      for (let i = histObj.histories[tfid].length - 1; i >= 0; i--) {
+        const m = histObj.histories[tfid][i];
+        if (m && m.role === 'assistant' && typeof m.content === 'string' && m.content.toLowerCase().includes(snippet)) {
+          return m.content;
+        }
+      }
+    }
+
+    // 2) search current session messages (most recent first)
+    if (sessionObj && Array.isArray(sessionObj.messages)) {
+      for (let i = sessionObj.messages.length - 1; i >= 0; i--) {
+        const m = sessionObj.messages[i];
+        if (m && m.role === 'assistant' && typeof m.content === 'string' && m.content.toLowerCase().includes(snippet)) {
+          return m.content;
+        }
+      }
+    }
+
+    return null;
+  } catch (e) {
+    logger.warn(null, tfid, null, `local fallback search error: ${String(e.message||e)}`);
+    return null;
+  }
+}
+
 /* Copy-marker helpers */
 function normalizeCopyMarkers(text) {
   if (!text || typeof text !== 'string') return text;
@@ -307,6 +505,23 @@ function formatSessionForClient(sessionObj) {
     })
   };
   return out;
+}
+
+/* Normalization + matching helpers for DB fallback */
+function normalizeTextForMatching(s) {
+  if (!s) return '';
+  return String(s)
+    .replace(/§/g, '')            // remove copy markers
+    .replace(/\*\*\*Terminé\*\*\*/gi, '')
+    .replace(/```[\s\S]*?```/g, '') // remove code fences
+    .replace(/[^\p{L}\p{N}\s]/gu, '') // remove punctuation (unicode-aware)
+    .replace(/\s+/g, ' ')
+    .trim()
+    .toLowerCase();
+}
+function wordsArray(s) {
+  const t = normalizeTextForMatching(s);
+  return t ? t.split(' ').filter(Boolean) : [];
 }
 
 /* Routes */
@@ -366,7 +581,7 @@ app.get('/session/:sessionId', async (req, res) => {
     return res.status(404).json({ error: 'session_not_found' });
   } catch (err) {
     logger.error(req.requestId, null, null, `/session/:id error: ${String(err)}`);
-    return res.status(500).json({ error: 'server_error', details: String(err?.message || err) });
+    return res.status(500).json({ error: 'server_error', details: String(err) });
   }
 });
 
@@ -381,7 +596,7 @@ app.get('/sessions', async (req, res) => {
     return res.json(out);
   } catch (err) {
     logger.error(req.requestId, null, null, `/sessions error: ${String(err)}`);
-    return res.status(500).json({ error: String(err?.message || err) });
+    return res.status(500).json({ error: String(err) });
   }
 });
 
@@ -494,6 +709,13 @@ async function handleMessage(req, res) {
     try { await writeJsonSafe(SESSIONS_FILE, sessionsData); } catch (e) { logger.error(req.requestId, tfid, sessionId, `Failed to persist sessions: ${String(e)}`); }
     try { await writeJsonSafe(USER_HISTORY_FILE, hist); } catch (e) { logger.error(req.requestId, tfid, sessionId, `Failed to persist user_history: ${String(e)}`); }
 
+    // ALSO attempt to persist this user message into the first available DATABASE_URL (rotation logic)
+    try {
+      await writeToFirstAvailableDb({ tfid, sessionId, role: 'user', content: clean, ts: Date.now() });
+    } catch (e) {
+      logger.warn(req.requestId, tfid, sessionId, `writeToFirstAvailableDb user error: ${String(e)}`);
+    }
+
     // Build prompt & trimming logic (same as before)
     const systemMsg = makeSystemPrompt(tfid, sessionId, user.name || DEFAULT_USER_NAME);
     let tail = (session.messages || []).slice(-HISTORY_TAIL).map(m => ({ role: m.role, content: m.content || '' }));
@@ -555,6 +777,8 @@ async function handleMessage(req, res) {
       hist.histories[tfid].push({ role: 'assistant', content: fallback, sessionId, ts: Date.now() });
       try { await writeJsonSafe(SESSIONS_FILE, sessionsData); } catch (e) {}
       try { await writeJsonSafe(USER_HISTORY_FILE, hist); } catch (e) {}
+      // persist fallback to DB
+      try { await writeToFirstAvailableDb({ tfid, sessionId, role: 'assistant', content: fallback, ts: Date.now() }); } catch(e){}
       const visible = extractVisibleFromWrapped(fallback);
       const normalized = normalizeCopyMarkers(visible).replace(/```(?:[a-zA-Z0-9]+\n)?([\s\S]*?)```/g, (m, p1) => { const inner = String(p1).replace(/^\n+|\n+$/g, ''); return '§' + inner + '§'; });
       const rendered = renderCopyableMarkersToMarkdown(normalized);
@@ -698,6 +922,13 @@ async function handleMessage(req, res) {
       try { await writeJsonSafe(SESSIONS_FILE, sessionsData); } catch (e) {}
       try { await writeJsonSafe(USER_HISTORY_FILE, hist); } catch (e) {}
 
+      // Persist assistant answer into DB rotation as well
+      try {
+        await writeToFirstAvailableDb({ tfid, sessionId, role: 'assistant', content: wrapped, ts: Date.now() });
+      } catch (e) {
+        logger.warn(req.requestId, tfid, sessionId, `writeToFirstAvailableDb assistant error: ${String(e)}`);
+      }
+
       let visible = extractVisibleFromWrapped(wrapped);
 
       // Normalize and convert triple-backticks to § markers
@@ -724,10 +955,97 @@ async function handleMessage(req, res) {
     if (lastResp) {
       logger.error(req.requestId, tfid, sessionId, `Provider lastResp status: ${lastResp.status}`);
       if (lastResp.fetchError) logger.error(req.requestId, tfid, sessionId, `Provider fetchError: ${String(lastResp.fetchError)}`);
+
       if (lastResp.text && lastResp.text.trim()) {
         const statusToSend = Number.isInteger(lastResp.status) ? lastResp.status : 502;
+
+        // First try DB fallback (existing)
+        let fallback = null;
+        try {
+          fallback = await findFallbackResponseInDbs(clean, tfid);
+        } catch (e) {
+          logger.warn(req.requestId, tfid, sessionId, `findFallbackResponseInDbs error: ${String(e.message||e)}`);
+          fallback = null;
+        }
+
+        // If DB fallback found a candidate, use it
+        if (fallback) {
+          const wrapped = ensureMarkerBefore(fallback);
+          session.messages.push({ role: 'assistant', content: wrapped, ts: Date.now() });
+          hist.histories[tfid].push({ role: 'assistant', content: wrapped, sessionId, ts: Date.now() });
+          try { await writeJsonSafe(SESSIONS_FILE, sessionsData); } catch (e) {}
+          try { await writeJsonSafe(USER_HISTORY_FILE, hist); } catch (e) {}
+          await writeToFirstAvailableDb({ tfid, sessionId, role: 'assistant', content: wrapped, ts: Date.now() }).catch(()=>{});
+          const visible = extractVisibleFromWrapped(wrapped);
+          const normalized = normalizeCopyMarkers(visible).replace(/```(?:[a-zA-Z0-9]+\n)?([\s\S]*?)```/g, (m,p1) => {
+            const inner = String(p1).replace(/^\n+|\n+$/g,'');
+            return '§' + inner + '§';
+          });
+          const rendered = renderCopyableMarkersToMarkdown(normalized);
+          return res.json({ tfid, session: formatSessionForClient(session), assistant: normalized, assistant_rendered: rendered });
+        }
+
+        // If DB fallback not found or DBs unreachable, try local fallback in sessions/user_history
+        try {
+          const local = await findFallbackInLocalHistory(clean, session, hist, tfid);
+          if (local) {
+            const wrapped = ensureMarkerBefore(local);
+            session.messages.push({ role: 'assistant', content: wrapped, ts: Date.now() });
+            hist.histories[tfid].push({ role: 'assistant', content: wrapped, sessionId, ts: Date.now() });
+            try { await writeJsonSafe(SESSIONS_FILE, sessionsData); } catch (e) {}
+            try { await writeJsonSafe(USER_HISTORY_FILE, hist); } catch (e) {}
+            await writeToFirstAvailableDb({ tfid, sessionId, role: 'assistant', content: wrapped, ts: Date.now() }).catch(()=>{});
+            const visible = extractVisibleFromWrapped(wrapped);
+            const normalized = normalizeCopyMarkers(visible).replace(/```(?:[a-zA-Z0-9]+\n)?([\s\S]*?)```/g, (m,p1) => {
+              const inner = String(p1).replace(/^\n+|\n+$/g,'');
+              return '§' + inner + '§';
+            });
+            const rendered = renderCopyableMarkersToMarkdown(normalized);
+            return res.json({ tfid, session: formatSessionForClient(session), assistant: normalized, assistant_rendered: rendered });
+          }
+        } catch (e) {
+          logger.warn(req.requestId, tfid, sessionId, `local fallback attempt error: ${String(e.message||e)}`);
+        }
+
+        // Nothing found in DBs or local history: return provider body (error JSON) to client
         return res.status(statusToSend).type('text').send(lastResp.text);
       }
+    }
+
+    // provider didn't yield anything useful: try DB fallback
+    const fallback = await findFallbackResponseInDbs(clean, tfid);
+    if (fallback) {
+      const wrapped = ensureMarkerBefore(fallback);
+      session.messages.push({ role: 'assistant', content: wrapped, ts: Date.now() });
+      hist.histories[tfid].push({ role: 'assistant', content: wrapped, sessionId, ts: Date.now() });
+      try { await writeJsonSafe(SESSIONS_FILE, sessionsData); } catch (e) {}
+      try { await writeJsonSafe(USER_HISTORY_FILE, hist); } catch (e) {}
+      await writeToFirstAvailableDb({ tfid, sessionId, role: 'assistant', content: wrapped, ts: Date.now() }).catch(()=>{});
+      const visible = extractVisibleFromWrapped(wrapped);
+      const normalized = normalizeCopyMarkers(visible).replace(/```(?:[a-zA-Z0-9]+\n)?([\s\S]*?)```/g, (m,p1) => {
+        const inner = String(p1).replace(/^\n+|\n+$/g,'');
+        return '§' + inner + '§';
+      });
+      const rendered = renderCopyableMarkersToMarkdown(normalized);
+      return res.json({ tfid, session: formatSessionForClient(session), assistant: normalized, assistant_rendered: rendered });
+    }
+
+    // As last resort try local fallback
+    const local = await findFallbackInLocalHistory(clean, session, hist, tfid);
+    if (local) {
+      const wrapped = ensureMarkerBefore(local);
+      session.messages.push({ role: 'assistant', content: wrapped, ts: Date.now() });
+      hist.histories[tfid].push({ role: 'assistant', content: wrapped, sessionId, ts: Date.now() });
+      try { await writeJsonSafe(SESSIONS_FILE, sessionsData); } catch (e) {}
+      try { await writeJsonSafe(USER_HISTORY_FILE, hist); } catch (e) {}
+      await writeToFirstAvailableDb({ tfid, sessionId, role: 'assistant', content: wrapped, ts: Date.now() }).catch(()=>{});
+      const visible = extractVisibleFromWrapped(wrapped);
+      const normalized = normalizeCopyMarkers(visible).replace(/```(?:[a-zA-Z0-9]+\n)?([\s\S]*?)```/g, (m,p1) => {
+        const inner = String(p1).replace(/^\n+|\n+$/g,'');
+        return '§' + inner + '§';
+      });
+      const rendered = renderCopyableMarkersToMarkdown(normalized);
+      return res.json({ tfid, session: formatSessionForClient(session), assistant: normalized, assistant_rendered: rendered });
     }
 
     return res.status(502).json({ error: 'no_response_from_provider' });
@@ -735,6 +1053,83 @@ async function handleMessage(req, res) {
     logger.error(req.requestId, null, null, `/message error: ${String(err)}`);
     return res.status(500).json({ error: 'server_error', details: String(err?.message || err) });
   }
+}
+
+/* Fallback DB search with fuzzy matching + random pick among top matches */
+async function findFallbackResponseInDbs(userText, tfid = null) {
+  if (!userText) return null;
+  if (!dbPools || dbPools.length === 0) {
+    await ensureDbPools();
+    if (!dbPools || dbPools.length === 0) return null;
+  }
+
+  const qSnippet = userText.trim().slice(0, 200).replace(/[%_]/g, ''); // safe-ish snippet
+  const sql = `SELECT content, ts FROM messages WHERE role='assistant' AND content ILIKE $1 ORDER BY ts DESC LIMIT 200`;
+  const results = [];
+
+  for (let i = 0; i < dbPools.length; i++) {
+    const pool = dbPools[i];
+    if (!pool) continue;
+    try {
+      const res = await pool.query(sql, [`%${qSnippet}%`]);
+      if (res && res.rows && res.rows.length) {
+        for (const r of res.rows) {
+          if (r && r.content) results.push({ content: r.content, ts: r.ts || 0 });
+        }
+      }
+    } catch (e) {
+      logger.warn(null, tfid, null, `Fallback search db idx=${i} error: ${String(e.message||e)}`);
+      continue;
+    }
+  }
+
+  if (!results.length) return null;
+
+  // Score candidates by word-overlap ratio and word-count closeness
+  const userWords = wordsArray(userText);
+  const userLen = userWords.length || 1;
+
+  function scoreCandidate(candidateText) {
+    const norm = normalizeTextForMatching(candidateText);
+    const candWords = norm.split(' ').filter(Boolean);
+    const candLen = candWords.length || 1;
+
+    // compute intersection size
+    const setUser = new Set(userWords);
+    let common = 0;
+    for (const w of candWords) if (setUser.has(w)) common++;
+
+    const overlapRatio = common / Math.max(userLen, candLen); // 0..1
+    const lenDiffRatio = Math.abs(userLen - candLen) / userLen; // 0..inf
+
+    // scoring heuristic: prefer higher overlap and small length diff
+    const score = (overlapRatio * 1.0) - (lenDiffRatio * 0.4);
+    return { score, overlapRatio, lenDiffRatio, candLen, norm };
+  }
+
+  const scored = results.map(r => ({ ...r, ...scoreCandidate(r.content) }));
+
+  // Keep only reasonably similar candidates (overlap >= 0.25 or lenDiff <= 0.35)
+  const filtered = scored.filter(s => s.overlapRatio >= 0.25 || s.lenDiffRatio <= 0.35);
+  if (!filtered.length) {
+    // if none pass threshold, fallback to top 10 most recent raw results
+    const fallbackRecent = results.slice(0, 10).map(r => r.content);
+    return fallbackRecent.length ? fallbackRecent[Math.floor(Math.random() * fallbackRecent.length)] : null;
+  }
+
+  // sort by score desc and take top N (e.g., top 6)
+  filtered.sort((a, b) => b.score - a.score);
+  const topN = filtered.slice(0, Math.min(filtered.length, 6));
+
+  // Choose randomly among topN but weighted by score
+  const weights = topN.map(t => Math.max(0.001, t.score + 1)); // shift to positive
+  const totalW = weights.reduce((s, v) => s + v, 0);
+  let pick = Math.random() * totalW;
+  for (let i = 0; i < topN.length; i++) {
+    pick -= weights[i];
+    if (pick <= 0) return topN[i].content;
+  }
+  return topN[topN.length - 1].content;
 }
 
 app.post('/message', handleMessage);
@@ -756,7 +1151,7 @@ if (app && app._router && app._router.stack) {
   });
 }
 
-app.listen(PORT, () => {
-  logger.info(null, null, null, `Server listening on http://localhost:${PORT} (HISTORY_TAIL=${HISTORY_TAIL}, RESPONSE_MAX_TOKENS=${DEFAULT_MAX_TOKENS})`);
+app.listen(PORT, '0.0.0.0', () => {
+  logger.info(null, null, null, `Server listening on http://0.0.0.0:${PORT} (HISTORY_TAIL=${HISTORY_TAIL}, RESPONSE_MAX_TOKENS=${DEFAULT_MAX_TOKENS})`);
 });
 
