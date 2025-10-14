@@ -178,6 +178,32 @@ function extractVisibleFromWrapped(wrapped) {
   return wrapped.slice(0, idx).trim();
 }
 
+/* New robust sanitizer: removes repeated leading "assistant" labels */
+function sanitizeAssistantContent(s) {
+  if (!s || typeof s !== 'string') return '';
+  let out = String(s);
+
+  // remove leading BOM/spaces/newlines repeatedly
+  out = out.replace(/^\uFEFF/, '').trimStart();
+
+  // Keep removing repeated leading assistant labels like:
+  // "assistant:", "assistant :", "assistant -", "assistant - :", "assistant assistant:", "assistant: assistant:"
+  // Do it in a loop until nothing left to remove to handle repeated occurrences.
+  while (true) {
+    const prev = out;
+    // patterns to remove at start
+    out = out.replace(/^[\s]*assistant[\s]*[:\-–—]?[\s]*/i, '');
+    // also remove a possible leftover "assistant:" sequences (case-insensitive)
+    out = out.replace(/^[\s]*assistant[:\-\s]+/i, '');
+    // remove lonely "assistant" line at very start
+    out = out.replace(/^\s*assistant\s*\n+/i, '');
+    if (out === prev) break;
+  }
+
+  // Trim leading/trailing whitespace and return
+  return out.trim();
+}
+
 /* Token/char estimation */
 function estimateTokensFromString(s) {
   if (!s) return 0;
@@ -372,6 +398,43 @@ async function ensurePoolsInitialized() {
   }
 }
 await ensurePoolsInitialized();
+
+// --- START: fetch recent messages for a TFID from all DB pools (add this near other DB helpers) ---
+async function fetchMessagesForTFIDFromDbs(tfid, limit = 1000) {
+  if (!tfid) return [];
+  if (!dbPools || dbPools.length === 0) {
+    await ensureDbPools();
+    if (!dbPools || dbPools.length === 0) return [];
+  }
+
+  const results = [];
+  const sql = `SELECT role, content, ts FROM messages WHERE tfid=$1 ORDER BY ts ASC LIMIT $2`;
+  for (let i = 0; i < dbPools.length; i++) {
+    const pool = dbPools[i];
+    if (!pool) continue;
+    try {
+      const r = await pool.query(sql, [tfid, limit]);
+      if (r && Array.isArray(r.rows) && r.rows.length) {
+        for (const row of r.rows) {
+          // ensure row has role/content/ts
+          results.push({
+            role: (row.role || '').toLowerCase(),
+            content: row.content || '',
+            ts: Number(row.ts || 0)
+          });
+        }
+      }
+    } catch (e) {
+      logger.warn(null, tfid, null, `fetchMessagesForTFIDFromDbs db idx=${i} error: ${String(e.message || e)}`);
+      continue;
+    }
+  }
+
+  // sort ascending by ts
+  results.sort((a, b) => (a.ts || 0) - (b.ts || 0));
+  return results;
+}
+// --- END helper ---
 
 async function shutdownDbPools() {
   for (const pool of dbPools) {
@@ -718,7 +781,64 @@ async function handleMessage(req, res) {
 
     // Build prompt & trimming logic (same as before)
     const systemMsg = makeSystemPrompt(tfid, sessionId, user.name || DEFAULT_USER_NAME);
-    let tail = (session.messages || []).slice(-HISTORY_TAIL).map(m => ({ role: m.role, content: m.content || '' }));
+
+    /* ---------------------------
+       NEW: build `tail` by combining DB messages + session + user_history
+       ensuring latest user message has priority (placed last).
+       --------------------------- */
+
+    // --- START: augment tail with DB messages and ensure latest user message has priority ---
+    let dbMessages = [];
+    try {
+      dbMessages = await fetchMessagesForTFIDFromDbs(tfid, Math.max(200, HISTORY_TAIL * 2));
+    } catch (e) {
+      logger.warn(req.requestId, tfid, sessionId, `fetchMessagesForTFIDFromDbs error: ${String(e.message || e)}`);
+      dbMessages = [];
+    }
+
+    // gather local messages (session + user_history) and DB messages, dedupe and sort by ts
+    const combinedMap = new Map();
+    function addToCombined(m) {
+      if (!m || !m.content) return;
+      const ts = Number(m.ts || 0) || Date.now();
+      // key uses ts + role + first-120-chars to avoid trivial dupes
+      const key = `${ts}-${(m.role||'').toLowerCase()}-${String(m.content).slice(0,120)}`;
+      if (!combinedMap.has(key)) combinedMap.set(key, { role: (m.role||'user'), content: String(m.content || ''), ts });
+    }
+
+    // add session messages (they already include the current appended user message)
+    (session.messages || []).forEach(addToCombined);
+
+    // add DB messages
+    dbMessages.forEach(addToCombined);
+
+    // add persisted user_history if available
+    try {
+      if (hist && hist.histories && Array.isArray(hist.histories[tfid])) {
+        hist.histories[tfid].forEach(addToCombined);
+      }
+    } catch (e) {
+      logger.warn(req.requestId, tfid, sessionId, `adding history fallback failed: ${String(e.message || e)}`);
+    }
+
+    // ensure the freshly received user message (clean) is present AND placed last (priority)
+    const nowTs = Date.now();
+    addToCombined({ role: 'user', content: clean, ts: nowTs });
+
+    // turn map into sorted array ascending
+    let mergedArr = Array.from(combinedMap.values()).sort((a,b) => (a.ts||0) - (b.ts||0));
+
+    // ensure last element is the freshest user message; if not, push it
+    if (!mergedArr.length || mergedArr[mergedArr.length - 1].content !== clean) {
+      mergedArr.push({ role: 'user', content: clean, ts: nowTs });
+    }
+
+    // keep only the last HISTORY_TAIL messages (we want the most recent HISTORY_TAIL)
+    mergedArr = mergedArr.slice(-HISTORY_TAIL);
+
+    // finally build tail as messages for provider
+    let tail = mergedArr.map(m => ({ role: m.role, content: m.content || '' }));
+    // --- END augment tail ---
 
     function estimatePromptTokens(systemObj, tailArr, finalUserContent) {
       let tokens = estimateTokensFromString(systemObj.content);
@@ -914,9 +1034,11 @@ async function handleMessage(req, res) {
     } // end provider attempts
 
     if (assistantText) {
-      const wrapped = ensureMarkerBefore(assistantText);
+      // sanitize leading assistant labels aggressively
+      const cleanedAssistant = sanitizeAssistantContent(assistantText);
+      const wrapped = ensureMarkerBefore(cleanedAssistant);
 
-      // store wrapped in session/history (raw from model)
+      // store wrapped in session/history (raw from model, but sanitized)
       session.messages.push({ role: 'assistant', content: wrapped, ts: Date.now() });
       hist.histories[tfid].push({ role: 'assistant', content: wrapped, sessionId, ts: Date.now() });
       try { await writeJsonSafe(SESSIONS_FILE, sessionsData); } catch (e) {}
@@ -970,7 +1092,8 @@ async function handleMessage(req, res) {
 
         // If DB fallback found a candidate, use it
         if (fallback) {
-          const wrapped = ensureMarkerBefore(fallback);
+          const cleaned = sanitizeAssistantContent(fallback);
+          const wrapped = ensureMarkerBefore(cleaned);
           session.messages.push({ role: 'assistant', content: wrapped, ts: Date.now() });
           hist.histories[tfid].push({ role: 'assistant', content: wrapped, sessionId, ts: Date.now() });
           try { await writeJsonSafe(SESSIONS_FILE, sessionsData); } catch (e) {}
@@ -989,7 +1112,8 @@ async function handleMessage(req, res) {
         try {
           const local = await findFallbackInLocalHistory(clean, session, hist, tfid);
           if (local) {
-            const wrapped = ensureMarkerBefore(local);
+            const cleaned = sanitizeAssistantContent(local);
+            const wrapped = ensureMarkerBefore(cleaned);
             session.messages.push({ role: 'assistant', content: wrapped, ts: Date.now() });
             hist.histories[tfid].push({ role: 'assistant', content: wrapped, sessionId, ts: Date.now() });
             try { await writeJsonSafe(SESSIONS_FILE, sessionsData); } catch (e) {}
@@ -1015,7 +1139,8 @@ async function handleMessage(req, res) {
     // provider didn't yield anything useful: try DB fallback
     const fallback = await findFallbackResponseInDbs(clean, tfid);
     if (fallback) {
-      const wrapped = ensureMarkerBefore(fallback);
+      const cleaned = sanitizeAssistantContent(fallback);
+      const wrapped = ensureMarkerBefore(cleaned);
       session.messages.push({ role: 'assistant', content: wrapped, ts: Date.now() });
       hist.histories[tfid].push({ role: 'assistant', content: wrapped, sessionId, ts: Date.now() });
       try { await writeJsonSafe(SESSIONS_FILE, sessionsData); } catch (e) {}
@@ -1031,9 +1156,10 @@ async function handleMessage(req, res) {
     }
 
     // As last resort try local fallback
-    const local = await findFallbackInLocalHistory(clean, session, hist, tfid);
-    if (local) {
-      const wrapped = ensureMarkerBefore(local);
+    const localFallback = await findFallbackInLocalHistory(clean, session, hist, tfid);
+    if (localFallback) {
+      const cleaned = sanitizeAssistantContent(localFallback);
+      const wrapped = ensureMarkerBefore(cleaned);
       session.messages.push({ role: 'assistant', content: wrapped, ts: Date.now() });
       hist.histories[tfid].push({ role: 'assistant', content: wrapped, sessionId, ts: Date.now() });
       try { await writeJsonSafe(SESSIONS_FILE, sessionsData); } catch (e) {}
@@ -1154,4 +1280,3 @@ if (app && app._router && app._router.stack) {
 app.listen(PORT, '0.0.0.0', () => {
   logger.info(null, null, null, `Server listening on http://0.0.0.0:${PORT} (HISTORY_TAIL=${HISTORY_TAIL}, RESPONSE_MAX_TOKENS=${DEFAULT_MAX_TOKENS})`);
 });
-
