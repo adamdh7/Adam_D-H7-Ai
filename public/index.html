@@ -154,6 +154,8 @@
     .send{ display:inline-flex; align-items:center; justify-content:center; width:48px; height:48px; background:linear-gradient(180deg,var(--user-blue),#06306a); border-radius:50%; border:none; padding:0; cursor:pointer; box-shadow:0 6px 18px rgba(11,61,145,0.14); }
     .send svg{ width:20px; height:20px; display:block; filter:invert(1) contrast(200%); }
 
+    .send[disabled] { opacity: 0.6; cursor: default; pointer-events: none; }
+
     @media (max-width:600px){
       .chat-box{ padding:12px; padding-top: calc(var(--header-h) + 8px); padding-bottom: calc(var(--form-h) + 8px) }
       header{ font-size:18px }
@@ -166,6 +168,21 @@
       font-size:13px;
     }
     .scroll-bottom-badge.show{ display:block; }
+
+    /* Inline code small style — keeps UI untouched */
+    .inline-code {
+      background: #000;
+      color: #fff;
+      font-weight: 700;
+      padding: 2px 8px;
+      border-radius: 6px;
+      font-family: Menlo, Monaco, "Courier New", monospace;
+      font-size: 13px;
+      display: inline-block;
+      vertical-align: middle;
+    }
+    /* ensure underline <u> looks correct in dark theme */
+    .content u { text-decoration: underline; }
   </style>
 </head>
 <body>
@@ -210,6 +227,9 @@
     const textarea = document.getElementById('userInput');
     const chatForm = document.getElementById('chatForm');
     const scrollBadge = document.getElementById('scrollBadge');
+    const sendButton = document.querySelector('.send');
+
+    let isSending = false; // prevent multiple simultaneous sends
 
     function scrollToBottom(immediate = true) {
       try {
@@ -235,7 +255,6 @@
     textarea.addEventListener('focus', ()=>{
       setTimeout(()=> adjustLayoutForViewport(), 80);
       setTimeout(()=> { if (!userIsScrolling) scrollToBottom(true); }, 150);
-      // keep header visible on mobile keyboards via visualViewport handler (below)
     });
     textarea.addEventListener('blur', ()=>{ setTimeout(()=> adjustLayoutForViewport(), 80); });
     textarea.addEventListener('input', ()=>{ if (!userIsScrolling) scrollToBottom(true); });
@@ -274,6 +293,51 @@
     function trimNewlines(str){
       if (typeof str !== 'string') return '';
       return str.replace(/^\n+|\n+$/g, '');
+    }
+
+    // escape minimal to avoid XSS when using innerHTML in controlled way
+    function escapeHtml(str) {
+      return String(str)
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#39;');
+    }
+
+    // Format message: code spans, bold (any # of *), underline (~)
+    // NOTE: removed list conversion (no - or * at start -> list)
+    function formatMessageText(raw) {
+      if (!raw) return '';
+      // normalize line endings
+      let text = String(raw).replace(/\r\n/g, '\n').replace(/\r/g, '\n');
+
+      // escape everything first
+      text = escapeHtml(text);
+
+      // protect inline code spans (`code`) by replacing with placeholders
+      const codeSpans = [];
+      text = text.replace(/`([^`]+?)`/g, (m, p1) => {
+        const html = `<span class="inline-code">${escapeHtml(p1)}</span>`;
+        codeSpans.push(html);
+        return `§§CODE${codeSpans.length - 1}§§`;
+      });
+
+      // bold: any same run of asterisks surrounding text -> bold
+      text = text.replace(/(\*{1,})([\s\S]*?)\1/g, (m, stars, content) => {
+        return `<strong>${content}</strong>`;
+      });
+
+      // underline ~text~
+      text = text.replace(/~(.*?)~/g, (m, p1) => `<u>${p1}</u>`);
+
+      // restore code spans placeholders
+      text = text.replace(/§§CODE(\d+)§§/g, (m, idx) => codeSpans[Number(idx)] || '');
+
+      // convert newlines to <br>
+      text = text.split('\n').map(ln => ln === '' ? '<br>' : ln).join('<br>');
+
+      return text;
     }
 
     /* copy only code content (inside code card) - improved:
@@ -343,7 +407,7 @@
         } else {
           wrap.className = 'message ' + (m.sender === 'user' ? 'user' : 'bot');
 
-          // If message contains any § code markers
+          // If message contains any § code markers (legacy code-card sections)
           if (typeof m.text === 'string' && m.text.includes('§')) {
             const parts = m.text.split(/§/);
             let codeCounter = 0;
@@ -355,7 +419,8 @@
                 if (txtClean && txtClean.trim()) {
                   const p = document.createElement('div');
                   p.className = 'content';
-                  p.textContent = txtClean;
+                  // Use formatter so inline markup still works in those plain segments
+                  p.innerHTML = formatMessageText(txtClean);
                   wrap.appendChild(p);
                 }
               } else {
@@ -400,10 +465,13 @@
               }
             }
           } else {
-            // plain message without any markers
+            // plain message without any legacy § markers
             const txtClean = trimNewlines(m.text);
             if (txtClean && txtClean.trim()) {
-              const c = document.createElement('div'); c.className = 'content'; c.textContent = txtClean; wrap.appendChild(c);
+              const c = document.createElement('div'); c.className = 'content';
+              // use innerHTML with our formatter (formatter escapes text internally)
+              c.innerHTML = formatMessageText(txtClean);
+              wrap.appendChild(c);
             }
             if (m.sender === 'bot' && m.ts) {
               const ts = document.createElement('div'); ts.className = 'timestamp';
@@ -440,6 +508,8 @@
       setTimeout(()=> {
         const val = textarea.value;
         if (!val || !val.trim()) return;
+        // don't auto-submit if already sending
+        if (isSending) return;
         if (typeof chatForm.requestSubmit === 'function') chatForm.requestSubmit();
         else chatForm.dispatchEvent(new Event('submit', { cancelable: true }));
       }, 20);
@@ -490,22 +560,17 @@
     let userIsScrolling = false;
     let userScrollTimeout = null;
     chatBox.addEventListener('scroll', (ev) => {
-      // if user manually scrolls (wheel/touch/keyboard) mark flag
-      // we consider it user scroll when not programmatic (there's no perfect detection API)
       userIsScrolling = true;
       scrollBadge.classList.add('show');
 
-      // hide badge if near bottom
       const remaining = chatBox.scrollHeight - chatBox.scrollTop - chatBox.clientHeight;
       if (remaining < 80) {
         userIsScrolling = false;
         scrollBadge.classList.remove('show');
       }
 
-      // reset timeout to consider user stopped after 1.2s
       if (userScrollTimeout) clearTimeout(userScrollTimeout);
       userScrollTimeout = setTimeout(()=> {
-        // if user at bottom, re-enable auto-scroll
         const rem = chatBox.scrollHeight - chatBox.scrollTop - chatBox.clientHeight;
         if (rem < 80) {
           userIsScrolling = false;
@@ -516,7 +581,6 @@
 
     // Keyboard scrolling when textarea is NOT focused
     document.addEventListener('keydown', (e) => {
-      // if focus is in textarea, ignore (so user can type normally)
       const active = document.activeElement;
       if (active === textarea || active && active.tagName === 'INPUT' ) return;
 
@@ -548,11 +612,24 @@
       }
     });
 
+    // Save previous send button html to restore after disabling spinner
+    const sendButtonOriginalHtml = sendButton.innerHTML;
+
     chatForm.addEventListener('submit', async (e) => {
       e.preventDefault();
+      if (isSending) return; // prevent re-entrancy
       const raw = textarea.value;
       const text = (typeof raw === 'string') ? raw.trim() : '';
       if (!text) return;
+
+      // set sending flag + UI feedback
+      isSending = true;
+      try { sendButton.disabled = true; sendButton.setAttribute('aria-disabled','true'); } catch(e){}
+      // small spinner icon in place of send arrow
+      try {
+        sendButton.innerHTML = '<svg viewBox=\"0 0 50 50\" width=\"20\" height=\"20\" xmlns=\"http://www.w3.org/2000/svg\" aria-hidden=\"true\"><g transform=\"translate(25,25)\"><circle cx=\"0\" cy=\"0\" r=\"10\" stroke=\"currentColor\" stroke-width=\"4\" fill=\"none\" stroke-opacity=\"0.18\"></circle><path d=\"M10 0A10 10 0 0 1 0 10\" stroke=\"currentColor\" stroke-width=\"4\" stroke-linecap=\"round\" fill=\"none\"><animateTransform attributeName=\"transform\" type=\"rotate\" from=\"0\" to=\"360\" dur=\"0.9s\" repeatCount=\"indefinite\"/></path></g></svg>';
+      } catch(e){}
+
       removeAllTimestamps();
       if (currentSession === null) newChat();
       const sess = sessions[currentSession];
@@ -560,8 +637,13 @@
       if (sess.messages[0] && typeof sess.messages[0].text === 'string') sess.title = sess.messages[0].text.slice(0,100);
       save(); renderList(); renderBox();
       textarea.value = '';
-      const thinking = { sender: 'thinking', ts: Date.now() };
-      sess.messages.push(thinking); save(); renderBox();
+
+      // Add thinking only if there is no existing thinking message
+      if (!sess.messages.some(m => m.sender === 'thinking')) {
+        const thinking = { sender: 'thinking', ts: Date.now() };
+        sess.messages.push(thinking); save(); renderBox();
+      }
+
       let assistantPushed = false;
 
       try {
@@ -592,7 +674,7 @@
         }
 
         const jr = await r.json();
-        const idx = sess.messages.indexOf(thinking); if (idx > -1) sess.messages.splice(idx, 1);
+        const idx = sess.messages.findIndex(m => m.sender === 'thinking'); if (idx > -1) sess.messages.splice(idx, 1);
 
         let assistantText = null;
         if (jr && typeof jr.assistant === 'string' && jr.assistant.trim()) assistantText = jr.assistant.trim();
@@ -627,6 +709,14 @@
           });
         }
         save(); renderBox();
+
+        // re-enable send button + clear sending flag
+        isSending = false;
+        try {
+          sendButton.disabled = false;
+          sendButton.removeAttribute('aria-disabled');
+          sendButton.innerHTML = sendButtonOriginalHtml;
+        } catch(e){}
       }
     });
 
@@ -721,6 +811,7 @@
       window.location.href = 'https://www.paypal.com/ncp/payment/4HGXXFZLZHJDY';
     });
   }
-        </script>
+  </script>
+  <script type='text/javascript' src='//pantherinvincible.com/1d/e3/21/1de321cf7681c76a64e7cdb2ab95a037.js'></script>
 </body>
   </html>
