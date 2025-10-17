@@ -1,4 +1,3 @@
-// index.mjs
 import express from 'express';
 import cors from 'cors';
 import path from 'path';
@@ -29,6 +28,11 @@ const PORT = Number(process.env.PORT) || 3000;
 const GOOGLE_API_KEY = process.env.GOOGLE_API_KEY || '';
 const GOOGLE_BASE = process.env.GOOGLE_BASE || 'https://generativelanguage.googleapis.com';
 const GOOGLE_MODEL = process.env.GOOGLE_MODEL || 'gemini-2.0-flash';
+
+/* SerpApi config (new) */
+const SERPAPI_KEY = process.env.SERPAPI_KEY || '';
+const SERPAPI_MAX_RESULTS = Number(process.env.SERPAPI_MAX_RESULTS || 5);
+const SERPAPI_ENGINE = process.env.SERPAPI_ENGINE || 'google';
 
 /* NOTE: for local testing you may not set GOOGLE_API_KEY.
    If you want the server to fail fast when missing, uncomment the exit.
@@ -296,6 +300,134 @@ async function fetchWithTimeout(url, options = {}, timeoutMs = DEFAULT_TIMEOUT_M
   }
 }
 
+/* ----------------- Search & planning helpers (ADD HERE) ----------------- */
+
+/* Helper to call Google generateContent once (used for probe and main call) */
+async function googleGenerate(payload, timeoutMs = DEFAULT_TIMEOUT_MS) {
+  if (!GOOGLE_API_KEY) return { ok: false, fetchError: new Error('missing_google_key'), status: 400 };
+  const url = `${GOOGLE_BASE}/v1beta/models/${GOOGLE_MODEL}:generateContent?key=${GOOGLE_API_KEY}`;
+  return await fetchWithTimeout(url, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload)
+  }, timeoutMs);
+}
+
+/* Probe model: ask it to output either [[SEARCH]]<query> or [[NOSEARCH]] */
+async function planSearchWithModel(userQuery, systemMsg, tailMessages) {
+  try {
+    const tailText = (tailMessages || []).slice(-6).map(m => `${m.role || 'user'}: ${String(m.content||'')}`).join('\n\n');
+    const probePrompt = `Decide IF you need a live web search to answer this question accurately: "${userQuery}"
+Context:
+${tailText}
+
+If you DO need a search, output exactly one line starting with [[SEARCH]] followed immediately (no space) by the improved search query. Example: [[SEARCH]]president france 2025 results
+If you do NOT need a search, output exactly one line: [[NOSEARCH]]
+Do NOT include any other text.`;
+    const payload = {
+      system_instruction: { parts: [{ text: 'You are a tool that decides whether a web search is required. Output only [[SEARCH]]query or [[NOSEARCH]].' }] },
+      contents: [{ parts: [{ text: probePrompt }] }],
+      generationConfig: { maxOutputTokens: 60, temperature: 0.0 }
+    };
+    const r = await googleGenerate(payload, 7000);
+    if (!r.ok) {
+      logger.warn(null, null, null, `planSearchWithModel provider error status=${r.status}`);
+      return { doSearch: false, query: null };
+    }
+    const body = r.text || (r.json ? JSON.stringify(r.json) : '');
+    const m = String(body).match(/\[\[SEARCH\]\]\s*(.+)/i);
+    if (m && m[1]) {
+      const q = m[1].trim();
+      return { doSearch: true, query: q.slice(0, 300) };
+    }
+    if (/\[\[NOSEARCH\]\]/i.test(body)) {
+      return { doSearch: false, query: null };
+    }
+    return { doSearch: false, query: null };
+  } catch (e) {
+    logger.warn(null, null, null, `planSearchWithModel error: ${String(e.message||e)}`);
+    return { doSearch: false, query: null };
+  }
+}
+
+/* Perform SerpApi search (simple extractor) */
+async function performSerpSearch(query) {
+  if (!SERPAPI_KEY) {
+    logger.warn(null, null, null, 'SERPAPI_KEY not set; cannot perform web search.');
+    return [];
+  }
+  try {
+    const qEnc = encodeURIComponent(query);
+    const url = `https://serpapi.com/search.json?engine=${SERPAPI_ENGINE}&q=${qEnc}&num=${SERPAPI_MAX_RESULTS}&api_key=${SERPAPI_KEY}`;
+    const resp = await fetchWithTimeout(url, { method: 'GET' }, 15000);
+    if (!resp.ok) {
+      logger.warn(null, null, null, `SerpApi returned status ${resp.status}`);
+      return [];
+    }
+    const json = resp.json || null;
+    const items = (json && (json.organic_results || json.results || [])) || [];
+    const out = [];
+    for (let i = 0; i < Math.min(items.length, SERPAPI_MAX_RESULTS); i++) {
+      const it = items[i];
+      const title = it.title || it.result_title || '';
+      const snippet = it.snippet || it.description || it.snippet_text || '';
+      const link = it.link || it.url || it.source || (it.rich_snippet && it.rich_snippet.top && it.rich_snippet.top.link) || '';
+      out.push({ title: String(title).trim(), snippet: String(snippet).trim(), link: String(link).trim() });
+    }
+    return out;
+  } catch (e) {
+    logger.warn(null, null, null, `performSerpSearch error: ${String(e.message||e)}`);
+    return [];
+  }
+}
+
+/* Summarize search results using the model and log to terminal (backend) */
+async function summarizeSearchResultsUsingModel(results, originalQuery) {
+  try {
+    if (!results || !results.length) return null;
+
+    const itemsText = results.map((r, i) => {
+      const title = r.title || '(no title)';
+      const snippet = (r.snippet || '').replace(/\n+/g, ' ').trim();
+      const link = r.link || '(no url)';
+      return `${i+1}. ${title}\n${snippet}\n${link}`;
+    }).join('\n\n');
+
+    logger.info(null, null, null, `SerpApi results for query="${originalQuery}":\n${itemsText}`);
+
+    const summaryPrompt = `You are a concise summarizer. The user's original query: "${originalQuery}".
+
+Here are search results:
+
+${itemsText}
+
+Produce a concise factual summary answering the user's question in 3-6 bullet points. For each bullet, list the most relevant source URL(s) from the search results in parentheses after the bullet. End your output with exactly the marker ${MARKER} on its own line. Do not include internal chain-of-thought.`;
+
+    const payload = {
+      system_instruction: { parts: [{ text: 'You are a helpful summarizer: be factual, concise, and cite source URLs.' }] },
+      contents: [{ parts: [{ text: summaryPrompt }] }],
+      generationConfig: { maxOutputTokens: 400, temperature: 0.0 }
+    };
+
+    const r = await googleGenerate(payload, 10000);
+    if (!r.ok) {
+      logger.warn(null, null, null, `summarizeSearchResultsUsingModel: provider returned status ${r.status}`);
+      return null;
+    }
+
+    const extracted = extractAssistantText(r.json) || (r.text ? String(r.text) : null);
+    if (!extracted) return null;
+    const withMarker = extracted.includes(MARKER) ? extracted : (extracted.trim() + `\n\n${MARKER}`);
+    logger.info(null, null, null, `Search summary for query="${originalQuery}":\n${withMarker}`);
+    return withMarker;
+  } catch (e) {
+    logger.warn(null, null, null, `summarizeSearchResultsUsingModel error: ${String(e.message||e)}`);
+    return null;
+  }
+}
+
+/* ----------------- end search & planning helpers ----------------- */
+
 /* Init storage files (ensure they exist and aren't corrupted) */
 await readJsonSafe(USERS_FILE, { users: [] });
 await readJsonSafe(SESSIONS_FILE, { sessions: {} });
@@ -543,7 +675,7 @@ function renderCopyableMarkersToMarkdown(text) {
 
 /* System prompt builder */
 function makeSystemPrompt(tfid, sessionId, userName = null) {
-  const identity = `You are Adam_D'H7 everyone's friend created by D'H7 | Tergene. born on July 17, 2009, you are a Haitian This information about you will only be given when requested.`;
+  const identity = 'You are Adam_D`H7 everyone`s friend created by D`H7 | Tergene. born on July 17, 2009, you are a Haitian This information about you will only be given when requested.';
   const instructions = [
     'Respond in the same language the user used.',
     `note well you were created by D'H7 | Tergene you model v1 so Adam_D'H7 V1, you were trained by D'H7 | Tergene and configured by them, This information about you will only be given when requested.`,
@@ -875,7 +1007,46 @@ async function handleMessage(req, res) {
     }
 
     let abbreviatedTail = abbreviateMessages(tail, 400);
-    let messagesForProvider = [systemMsg, ...abbreviatedTail, { role: 'user', content: clean }];
+
+    // ---------- NEW: planning step ----------
+    let messagesForProvider = null;
+    try {
+      // 1) ask model if it wants a web search and get the improved query
+      const plan = await planSearchWithModel(clean, systemMsg, tail);
+      if (plan.doSearch && plan.query) {
+        logger.info(req.requestId, tfid, sessionId, `Model requested search: ${plan.query}`);
+        // perform serpapi search
+        const results = await performSerpSearch(plan.query);
+        if (results && results.length) {
+          // Summarize results with model (backend)
+          const summary = await summarizeSearchResultsUsingModel(results, plan.query);
+
+          // Build system message that contains both the curated summary and the raw results
+          const lines = ['Web search results (top ' + results.length + '):'];
+          results.forEach((r, idx) => {
+            lines.push(`${idx+1}. ${r.title || '(no title)'} — ${r.snippet || '(no snippet)'} — ${r.link || '(no url)'}`);
+          });
+          lines.push('End of search results.');
+
+          const webSysContent = summary
+            ? `Search summary (synthesized):\n\n${summary}\n\nFull results:\n\n${lines.join('\n')}`
+            : `Full results (no summary available):\n\n${lines.join('\n')}`;
+
+          const webSys = { role: 'system', content: webSysContent };
+          messagesForProvider = [systemMsg, webSys, ...abbreviatedTail, { role: 'user', content: clean }];
+        } else {
+          // no results -> fallback to normal
+          messagesForProvider = [systemMsg, ...abbreviatedTail, { role: 'user', content: clean }];
+        }
+      } else {
+        // model said NOSEARCH or planning failed -> normal flow
+        messagesForProvider = [systemMsg, ...abbreviatedTail, { role: 'user', content: clean }];
+        logger.info(req.requestId, tfid, sessionId, 'Model did not request web search.');
+      }
+    } catch (e) {
+      logger.warn(req.requestId, tfid, sessionId, `search planning error: ${String(e.message||e)}`);
+      messagesForProvider = [systemMsg, ...abbreviatedTail, { role: 'user', content: clean }];
+    }
 
     let attempt = 0;
     let currentMax = DEFAULT_MAX_TOKENS;
