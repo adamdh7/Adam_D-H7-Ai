@@ -1,340 +1,817 @@
-<!doctype html>
-
+<!DOCTYPE html>
 <html lang="ht">
 <head>
-<meta charset="utf-8" />
-<meta name="viewport" content="width=device-width,initial-scale=1.0" />
-<title>TF-Chat (dark • site1)</title>
-<link href="https://fonts.googleapis.com/css2?family=Roboto:wght@400;600;700&display=swap" rel="stylesheet">
-<style>
-:root{
-  --bg:#000000; --panel:#000000; --text:#e6eefb; --muted:#9aa6bf;
-  --card:#0b0b0b; --accent:#0b81ff; --header-h:56px;
-}
-*{box-sizing:border-box}
-html,body{height:100%;margin:0;padding:0;background:var(--bg);color:var(--text);font-family:Roboto,system-ui,Arial,sans-serif;-webkit-font-smoothing:antialiased}
-header{position:fixed;left:0;right:0;top:0;height:var(--header-h);display:flex;align-items:center;justify-content:center;background:var(--panel);z-index:1000;border-bottom:1px solid rgba(255,255,255,0.03)}
-.app-title{font-weight:700;font-size:18px}
-main{position:fixed;left:0;right:0;top:var(--header-h);bottom:0;overflow:auto;padding:12px}
-/* center content and keep same max width as white UI */
-.container{max-width:1100px;margin:0 auto}
-.search{padding:6px 0}
-.search-box{display:flex;align-items:center;gap:8px;background:var(--card);padding:10px;border-radius:999px;border:1px solid rgba(255,255,255,0.03)}
-.search-box input{flex:1;background:transparent;border:0;outline:none;color:var(--text);font-size:15px}
-.search-btn{background:var(--accent);border:none;color:white;padding:8px 12px;border-radius:10px;cursor:pointer;font-weight:600}
-.list{margin-top:12px}
-.contact{display:flex;gap:12px;align-items:center;padding:12px;border-radius:12px;cursor:pointer}
-.contact:hover{background:rgba(255,255,255,0.02)}
-.avatar{width:56px;height:56px;border-radius:50%;background:linear-gradient(180deg,rgba(255,255,255,0.02),rgba(255,255,255,0.01));display:inline-flex;align-items:center;justify-content:center;font-weight:700;font-size:18px;color:var(--text);flex-shrink:0}
-.meta{flex:1;min-width:0}
-.meta-top{display:flex;justify-content:space-between;align-items:flex-start}
-.name{font-weight:600;font-size:16px;overflow:hidden;white-space:nowrap;text-overflow:ellipsis}
-.time{font-size:12px;color:var(--muted)}
-.meta-bottom{display:flex;justify-content:space-between;margin-top:6px;align-items:center}
-.snippet{font-size:13px;color:var(--muted);overflow:hidden;white-space:nowrap;text-overflow:ellipsis}
-.badge{background:var(--accent);color:white;padding:4px 8px;border-radius:999px;font-weight:600;font-size:13px}
-.messages{padding:12px;height:calc(100% - 56px - 84px);overflow:auto;display:flex;flex-direction:column;gap:8px}
-.msg{max-width:74%;padding:10px;border-radius:12px;margin-bottom:4px}
-.msg.bot{background:#121212;color:var(--text);align-self:flex-start}
-.msg.user{background:linear-gradient(180deg,var(--accent),#0563c9);color:white;align-self:flex-end}
-.chat-input{display:flex;gap:8px;align-items:center}
-.input{flex:1;padding:12px;border-radius:999px;border:1px solid rgba(255,255,255,0.03);background:var(--card);color:var(--text);outline:none}
-.send-btn{background:transparent;border:0;padding:8px;border-radius:10px;cursor:pointer;color:var(--accent)}
-.muted{text-align:center;color:var(--muted);padding:20px}
-.bottom-right { position: fixed; right: 16px; bottom: 16px; z-index: 1100; display:flex; gap:8px; align-items:center; }
-.ws-indicator{font-size:12px;color:var(--muted);margin-right:8px}
-@media (min-width:900px){main .container{max-width:700px;margin:0 auto}}
-/* white settings panel on dark backdrop */
-.settings-panel{width:420px;background:#fff;border-radius:12px;padding:18px;box-shadow:0 10px 30px rgba(11,18,32,0.2);color:#0b1220}
-.settings-label{font-size:13px;color:#374151}
-/* contact details fullscreen adaptive */
-.contact-panel{width:100%;max-width:420px;background:#fff;color:#0b1220;border-radius:12px;padding:16px}
-</style>
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no"/>
+  <title>Adam_D'H7</title>
+  <link rel="manifest" href="manifest.json" />
+  <link rel="icon" type="image/jpeg" href="https://res.cloudinary.com/dglludnfq/image/upload/v1759692398/tf-stream-url/IMG-20251002-WA0108.jpg" />
+  <link rel="apple-touch-icon" href="https://res.cloudinary.com/dglludnfq/image/upload/v1759692398/tf-stream-url/IMG-20251002-WA0108.jpg" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+  <link href="https://fonts.googleapis.com/css2?family=Roboto:wght@400;700&display=swap" rel="stylesheet" />
+  <style>
+    :root{
+      --bg: #000000;
+      --panel: #000000;
+      --name-gray: #7d7d7d;
+      --ai-bubble: #262626;
+      --ai-text: #d0d0d0;
+      --user-blue: #0b3d91;
+      --user-text: #e8f4ff;
+      --border: rgba(255,255,255,0.04);
+      --timestamp: #6faee6;
+      --header-h: 56px;
+      --form-h: 84px;
+    }
+
+    html,body{
+      height:100%; margin:0; padding:0; background:var(--bg); color:var(--ai-text);
+      font-family:Roboto, Arial, Helvetica, sans-serif; -webkit-text-size-adjust:100%;
+      -webkit-overflow-scrolling:touch; overscroll-behavior-y:none; overflow:hidden; touch-action:pan-y;
+    }
+
+    header{
+      background:var(--panel); height:var(--header-h); display:flex; align-items:center; justify-content:center;
+      position:fixed; top:0; left:0; right:0; z-index:999; padding:0 12px; user-select:none;
+      box-shadow:0 1px 0 rgba(255,255,255,0.02) inset;
+      transition: top 120ms ease;
+    }
+    .menu-btn{position:absolute;left:12px;font-size:22px;cursor:pointer;color:var(--ai-text)}
+    .name-title{font-weight:800;color:var(--name-gray);font-size:20px;letter-spacing:0.2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+
+    .chat-box{
+      position:fixed; left:0; right:0; top:var(--header-h); bottom:var(--form-h);
+      display:flex; flex-direction:column; padding:12px 18px; overflow-y:auto; background:var(--panel);
+      box-sizing:border-box; -webkit-overflow-scrolling:touch;
+      /* hide scrollbar visually but keep scrolling functionality */
+      scrollbar-width: none; -ms-overflow-style: none;
+    }
+    .chat-box::-webkit-scrollbar { display: none; width:0; height:0; }
+
+    /* Reduced spacing to avoid extra "enter" lines */
+    .message{ margin:6px 0; max-width:76%; position:relative; overflow-wrap:anywhere; word-break:break-word; white-space:pre-wrap; }
+    .message.user{ align-self:flex-end }
+    .message.bot{ align-self:flex-start }
+    .message.user .content{ background:var(--user-blue); color:var(--user-text); border-radius:18px; padding:10px 14px; }
+    .message.bot .content{ background:var(--ai-bubble); color:var(--ai-text); border-radius:18px; padding:10px 14px; border:1px solid var(--border); }
+    .content{ font-size:15px; line-height:1.35; margin:0; padding:0; } /* remove extra gap */
+    .timestamp{ font-size:11px; color:var(--timestamp); margin-top:6px; text-align:right }
+
+    .message.bot.thinking .content{ display:flex; align-items:center; justify-content:flex-start; gap:10px; background:var(--ai-bubble); padding:8px 12px }
+    .thinking-dots{ display:inline-flex; gap:8px }
+    .thinking-dots span{ display:inline-block; width:9px; height:9px; border-radius:50%; background:var(--timestamp); opacity:0.12; transform:translateY(0); animation:dot 1.6s infinite ease-in-out; }
+    .thinking-dots span:nth-child(1){ animation-delay:0s; } .thinking-dots span:nth-child(2){ animation-delay:0.45s; } .thinking-dots span:nth-child(3){ animation-delay:0.9s; }
+    @keyframes dot{ 0% {opacity:0.12; transform:translateY(0);} 25% {opacity:0.9; transform:translateY(-7px);} 55% {opacity:0.35; transform:translateY(0);} 100% {opacity:0.12; transform:translateY(0);} }
+
+    .sidebar{ position:fixed; top:0; left:-100%; width:80%; height:100%; background:var(--panel); z-index:1001; box-shadow:2px 0 12px rgba(0,0,0,0.7); transition:left .28s ease; padding:18px; color:var(--ai-text); box-sizing:border-box }
+    .sidebar.active{ left:0 }
+
+    /* menu header layout adjusted to place center element exactly between left and right */
+    .menu-header{ display:flex; justify-content:space-between; align-items:center; margin-bottom:12px; position:relative; }
+    .menu-header h3{ margin:0; color:var(--ai-text) }
+
+    .menu-center{
+      position:absolute;
+      left:50%;
+      transform:translateX(-50%);
+      display:flex;
+      align-items:center;
+      gap:8px;
+      pointer-events:auto;
+    }
+    .erase-btn{
+      background:none;
+      border:1px solid rgba(255,255,255,0.06);
+      color:var(--ai-text);
+      padding:6px 10px;
+      border-radius:8px;
+      cursor:pointer;
+      font-size:14px;
+    }
+    .erase-btn:hover{ background: rgba(255,255,255,0.02); }
+
+    .chat-list{ list-style:none; padding:0; margin:0; overflow-y:auto; max-height:calc(100% - 60px) }
+    .chat-list li{ padding:8px; border-radius:6px; cursor:pointer; transition:background .18s; margin-bottom:10px; color:var(--ai-text) }
+    .chat-list li:hover{ background:rgba(255,255,255,0.02) }
+    .sidebar .new-chat-btn{ background:none; border:1px solid rgba(255,255,255,0.06); color:var(--ai-text); padding:6px 10px; border-radius:8px; cursor:pointer; font-size:14px }
+
+    /* Code card style (APK-like) - reduced spacing */
+    .code-card{
+      background:transparent;
+      border-radius:12px;
+      overflow:hidden;
+      margin:4px 0; /* small margin so no extra enter appears */
+      max-width:100%;
+      box-shadow: 0 8px 20px rgba(0,0,0,0.4);
+      border:1px solid rgba(255,255,255,0.03);
+    }
+    .code-header{
+      display:flex;
+      align-items:center;
+      justify-content:space-between;
+      gap:12px;
+      padding:8px 10px;
+      background: linear-gradient(180deg, rgba(255,255,255,0.02), rgba(255,255,255,0.01));
+      border-bottom:1px solid rgba(255,255,255,0.02);
+      font-size:13px;
+      color:var(--ai-text);
+    }
+    .code-header .label{ display:flex; align-items:center; gap:8px; font-weight:600; color:var(--ai-text); cursor:pointer; }
+    .code-body{
+      background:#060606;
+      padding:8px 12px;
+      font-family: Menlo, Monaco, "Courier New", monospace;
+      font-size:13px;
+      color:#dfe7f5;
+      white-space:pre-wrap;
+      line-height:1.45;
+      margin:0;
+    }
+
+    .code-copy-btn{
+      background:transparent;
+      border: none;
+      color:var(--ai-text);
+      cursor:pointer;
+      display:inline-flex;
+      align-items:center;
+      justify-content:center;
+      padding:6px;
+      gap:8px;
+      border-radius:8px;
+      transition:background .12s ease;
+    }
+    .code-copy-btn:hover{ background: rgba(255,255,255,0.02); }
+    .code-copy-icon{ width:18px; height:18px; display:inline-block; }
+
+    .code-header .right{ display:flex; align-items:center; gap:8px; }
+
+    form{ display:flex; padding:12px; background:var(--panel); border-top:1px solid rgba(255,255,255,0.03); position:fixed; bottom:0; left:0; right:0; align-items:center; gap:10px; height:var(--form-h); box-sizing:border-box }
+    textarea{ flex:1; padding:10px; font-size:15px; border-radius:18px; border:1px solid rgba(255,255,255,0.04); outline:none; resize:none; height:56px; background:#050505; color:var(--ai-text); box-sizing:border-box; width:100% }
+    textarea::placeholder{ color:rgba(255,255,255,0.18) }
+    .send{ display:inline-flex; align-items:center; justify-content:center; width:48px; height:48px; background:linear-gradient(180deg,var(--user-blue),#06306a); border-radius:50%; border:none; padding:0; cursor:pointer; box-shadow:0 6px 18px rgba(11,61,145,0.14); }
+    .send svg{ width:20px; height:20px; display:block; filter:invert(1) contrast(200%); }
+
+    .send[disabled] { opacity: 0.6; cursor: default; pointer-events: none; }
+
+    @media (max-width:600px){
+      .chat-box{ padding:12px; padding-top: calc(var(--header-h) + 8px); padding-bottom: calc(var(--form-h) + 8px) }
+      header{ font-size:18px }
+    }
+
+    /* small helper for "scroll to bottom" badge (optional) */
+    .scroll-bottom-badge{
+      position:fixed; right:16px; bottom:calc(var(--form-h) + 16px); z-index:900;
+      background:rgba(7,26,51,0.9); color:#fff; padding:8px 10px; border-radius:20px; cursor:pointer; display:none;
+      font-size:13px;
+    }
+    .scroll-bottom-badge.show{ display:block; }
+
+    /* Inline code small style — keeps UI untouched */
+    .inline-code {
+      background: #000;
+      color: #fff;
+      font-weight: 700;
+      padding: 2px 8px;
+      border-radius: 6px;
+      font-family: Menlo, Monaco, "Courier New", monospace;
+      font-size: 13px;
+      display: inline-block;
+      vertical-align: middle;
+    }
+    /* ensure underline <u> looks correct in dark theme */
+    .content u { text-decoration: underline; }
+  </style>
 </head>
 <body>
-  <header><div class="app-title">TF-Chat</div></header>  <main>
-    <div class="container">
-      <section class="search">
-        <div class="search-box" role="search">
-          <svg viewBox="0 0 24 24" width="16" height="16" fill="none"><path d="M21 21l-4.35-4.35" stroke="currentColor" stroke-width="1.6"/><circle cx="11" cy="11" r="6" stroke="currentColor" stroke-width="1.6"/></svg>
-          <input id="searchInput" placeholder="Recherche (TFID ou 7 chif)" aria-label="Recherche" />
-          <button id="searchBtn" class="search-btn">Rechercher</button>
-        </div>
-      </section><section class="list" id="contactsList" aria-live="polite"></section>
-</div>
+  <header>
+    <div class="menu-btn" onclick="toggleSidebar()" aria-label="menu">☰</div>
+    <div class="name-title" id="headerName">Adam_D'H7</div>
+  </header>
 
-<div class="bottom-right">
-  <div class="ws-indicator" id="wsStatus">WS: —</div>
-  <button id="settingsBtn" class="send-btn">Paramètres</button>
-</div>
+  <div class="sidebar" id="sidebar" aria-hidden="true">
+    <div class="menu-header">
+      <h3 style="margin:0;color:var(--ai-text)">Chats</h3>
 
-  </main>  <!-- Chat modal (fullscreen adaptive, uses history API so back button works) -->  <div id="chatModal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.96);z-index:1200">
-    <div style="height:100%;display:flex;flex-direction:column">
-      <div style="height:56px;display:flex;align-items:center;padding:8px 12px;border-bottom:1px solid rgba(255,255,255,0.03)">
-        <button id="chatBack" style="background:transparent;border:0;color:var(--text);cursor:pointer">←</button>
-        <div style="flex:1;text-align:center;font-weight:700" id="chatTitle">Chat</div>
-        <div style="width:44px"></div>
+      <!-- centered Efase tout -->
+      <div class="menu-center" aria-hidden="false">
+        <button class="erase-btn" onclick="eraseAll()" title="Effacer toutes les conversations et rafraîchir">Efase tout</button>
       </div>
-      <div style="overflow:auto;padding:12px;flex:1">
-        <div class="messages" id="messages"></div>
-      </div>
-      <div style="padding:12px;border-top:1px solid rgba(255,255,255,0.03)">
-        <div class="chat-input">
-          <input id="chatText" class="input" placeholder="Ekri mesaj..." autocomplete="off" />
-          <button id="sendBtn" class="send-btn">Envoyer</button>
-        </div>
-      </div>
+
+      <button class="new-chat-btn" onclick="newChat()">Nouveau Chat</button>
     </div>
-  </div>  <!-- Contact details panel (adaptive fullscreen on mobile) -->  <div id="contactPanelWrap" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.6);z-index:1300;align-items:center;justify-content:center;display:flex;">
-    <div id="contactPanel" class="contact-panel">
-      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
-        <div>
-          <div id="cpName" style="font-weight:800;font-size:18px">Nom</div>
-          <div id="cpTfid" style="color:#6b7280">TF-0000000</div>
-        </div>
-        <div>
-          <div id="cpActive" style="font-size:12px;color:#10b981">• actif</div>
-        </div>
-      </div>
-      <div style="margin-bottom:12px;color:#374151">Actions</div>
-      <div style="display:flex;gap:8px;flex-wrap:wrap">
-        <button id="cpAddContact" style="padding:8px 10px;border-radius:8px;border:1px solid #e6eef3;background:white;cursor:pointer">Ajoute Kontakt</button>
-        <button id="cpBlockToggle" style="padding:8px 10px;border-radius:8px;border:1px solid #e6eef3;background:white;cursor:pointer">Bloque</button>
-        <button id="cpClose" style="padding:8px 10px;border-radius:8px;background:#007aff;color:white;border:none;cursor:pointer">Ferme</button>
-      </div>
-    </div>
-  </div>  <!-- Settings modal: white inner panel -->  <div id="settingsModal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.6);z-index:1200;align-items:center;justify-content:center;display:flex;">
-    <div class="settings-panel" role="dialog" aria-modal="true">
-      <h3 style="margin:0 0 12px 0">Paramètres — Identité</h3>
-      <div style="margin-bottom:8px">
-        <label class="settings-label">Pseudo affiché</label>
-        <input id="profileNameInput" style="width:100%;padding:10px;border-radius:8px;border:1px solid #e6eef3;margin-top:6px" />
-      </div>
-      <div style="margin-bottom:12px">
-        <label class="settings-label">TFID (7 chif) — ex: 0204143</label>
-        <input id="profileTfidInput" style="width:100%;padding:10px;border-radius:8px;border:1px solid #e6eef3;margin-top:6px" />
-        <div style="font-size:12px;color:#6b7280;margin-top:6px">Sere TFID tankou TF-XXXXXXX. Sistèm lan konvèti pou TF-17-chif otomatikman.</div>
-      </div><div style="margin-bottom:12px">
-    <label class="settings-label">Mot de passe (optionel)</label>
-    <input id="profilePasswordInput" type="password" style="width:100%;padding:10px;border-radius:8px;border:1px solid #e6eef3;margin-top:6px" placeholder="Laisse vide pour garder / pas de mdp" />
-    <div style="font-size:12px;color:#6b7280;margin-top:6px">Si vous ajoutez un mot de passe, il sera stocké localement chiffré. Il permettra de revendiquer ce TFID sur ce navigateur.</div>
+    <ul class="chat-list" id="chatList"></ul>
   </div>
 
-  <div style="display:flex;justify-content:flex-end;gap:8px">
-    <button id="settingsCancel" style="padding:8px 12px;border-radius:8px;border:1px solid #e6edf3;background:white;cursor:pointer">Annuler</button>
-    <button id="profileSave" style="padding:8px 12px;border-radius:8px;background:#007aff;color:white;border:none;cursor:pointer">Sove</button>
-  </div>
-</div>
+  <div class="chat-box" id="chatBox" tabindex="0" aria-live="polite"></div>
 
-  </div><script>
-/* CONFIG */
-const API_BASE = 'https://tf-sove.onrender.com';
-const FRONTEND_NAME = 'site1';
-const ADMIN_API_TOKEN = 'tfstream_45dd9c02d4e34f18a42d';
-const WS_URL = (location.protocol === "https:" ? "wss://" : "ws://") + "tf-sove.onrender.com/ws";
+  <div class="scroll-bottom-badge" id="scrollBadge" title="Aller au bas">Aller au bas</div>
 
-/* HELPERS */
-function normalizeInputToDigits(inp){ if(!inp) return null; const s=String(inp).trim().toUpperCase(); const digits=s.replace(/[^0-9]/g,''); return digits||null; }
-function to17(shortOrDigits){ if(!shortOrDigits) return null; const ds=String(shortOrDigits).replace(/[^0-9]/g,''); if(ds.length>17) return ds.slice(-17); return ds.padStart(17,'0'); }
-function formatTFShort(digitsString){ if(!digitsString) return ''; const s=String(digitsString).replace(/[^0-9]/g,''); const last7 = s.slice(-7); return 'TF-'+ last7.padStart(7,'0'); }
-function nowISO(){ return (new Date()).toISOString(); }
-function fmtTime(iso){ try{ const d=new Date(iso); return d.toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'});}catch(e){return '';} }
-function escapeHtml(s){ return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
-function makeCid(){ return String(Date.now()) + '-' + Math.floor(Math.random()*100000).toString(16); }
-function parseDatePrefer(isoOrDb, parsedTime){ const t1 = parsedTime ? Date.parse(parsedTime) : NaN; if(!isNaN(t1)) return t1; const t2 = Date.parse(isoOrDb || ""); return isNaN(t2) ? 0 : t2; }
+  <form id="chatForm" autocomplete="off" novalidate>
+    <textarea id="userInput" placeholder="Adam_D'H7 le meilleure assistant" aria-label="Message"></textarea>
+    <button class="send" type="submit" aria-label="Send">
+      <svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true" focusable="false">
+        <path d="M2 21L23 12L2 3L8 12L2 21Z" fill="currentColor"/>
+      </svg>
+    </button>
+  </form>
 
-/* simple SHA-256 helper for client-side password hashing */
-async function sha256Hex(str){
-  const enc = new TextEncoder();
-  const data = enc.encode(str);
-  const hash = await crypto.subtle.digest('SHA-256', data);
-  const hex = Array.from(new Uint8Array(hash)).map(b=>b.toString(16).padStart(2,'0')).join('');
-  return hex;
-}
+  <script>
+    // Helpers + layout
+    const headerEl = document.querySelector('header');
+    const headerNameEl = document.getElementById('headerName');
+    const chatBox = document.getElementById('chatBox');
+    const formEl = document.querySelector('form');
+    const textarea = document.getElementById('userInput');
+    const chatForm = document.getElementById('chatForm');
+    const scrollBadge = document.getElementById('scrollBadge');
+    const sendButton = document.querySelector('.send');
 
-/* STATE */
-let me = { short: localStorage.getItem('tfchat.me.short') || null, tf17: localStorage.getItem('tfchat.me.17') || null, name: localStorage.getItem('tfchat.me.name') || 'Utilisateur', avatarDataUrl: localStorage.getItem('tfchat.me.avatar') || null };
-let contacts = JSON.parse(localStorage.getItem('tfchat.contacts') || '[]');
-let accounts = JSON.parse(localStorage.getItem('tfchat.accounts') || '{}'); // { tf17: { name, passwordHash } }
-let blocked = JSON.parse(localStorage.getItem('tfchat.blocked') || '[]'); // array of tf17 we blocked
-let presenceMap = JSON.parse(localStorage.getItem('tfchat.presence') || '{}'); // tf17 -> lastSeen timestamp
-let conversationCache = JSON.parse(localStorage.getItem('tfchat.conversations') || '{}'); // convKey -> [msgs]
-let ws = null; let reconnectTimer = null; let currentPartner = null;
+    let isSending = false; // prevent multiple simultaneous sends
 
-/* DOM refs */
-const searchInput = document.getElementById('searchInput');
-const searchBtn = document.getElementById('searchBtn');
-const contactsListEl = document.getElementById('contactsList');
-const chatModalEl = document.getElementById('chatModal');
-const messagesEl = document.getElementById('messages');
-const chatTitleEl = document.getElementById('chatTitle');
-const chatTextEl = document.getElementById('chatText');
-const sendBtnEl = document.getElementById('sendBtn');
-const wsStatusEl = document.getElementById('wsStatus');
-const settingsBtn = document.getElementById('settingsBtn');
-const settingsModal = document.getElementById('settingsModal');
-const profileNameInput = document.getElementById('profileNameInput');
-const profileTfidInput = document.getElementById('profileTfidInput');
-const profilePasswordInput = document.getElementById('profilePasswordInput');
-const profileSaveBtn = document.getElementById('profileSave');
-const settingsCancelBtn = document.getElementById('settingsCancel');
+    function scrollToBottom(immediate = true) {
+      try {
+        if (immediate) chatBox.scrollTop = chatBox.scrollHeight;
+        else chatBox.scrollTo({ top: chatBox.scrollHeight, behavior: 'smooth' });
+      } catch (e) {}
+    }
 
-const contactPanelWrap = document.getElementById('contactPanelWrap');
-const cpName = document.getElementById('cpName');
-const cpTfid = document.getElementById('cpTfid');
-const cpActive = document.getElementById('cpActive');
-const cpAddContact = document.getElementById('cpAddContact');
-const cpBlockToggle = document.getElementById('cpBlockToggle');
-const cpClose = document.getElementById('cpClose');
+    function adjustLayoutForViewport() {
+      const headerH = headerEl.offsetHeight || 56;
+      const formH = formEl.offsetHeight || 84;
+      chatBox.style.top = headerH + 'px';
+      chatBox.style.bottom = formH + 'px';
+      chatBox.style.paddingTop = '12px';
+      setTimeout(()=> {
+        if (!userIsScrolling) scrollToBottom(true);
+      }, 60);
+    }
 
-/* PERSISTENCE helpers */
-function saveState(){
-  localStorage.setItem('tfchat.me.short', me.short || '');
-  localStorage.setItem('tfchat.me.17', me.tf17 || '');
-  localStorage.setItem('tfchat.me.name', me.name || '');
-  if(me.avatarDataUrl) localStorage.setItem('tfchat.me.avatar', me.avatarDataUrl);
-  localStorage.setItem('tfchat.contacts', JSON.stringify(contacts || []));
-  localStorage.setItem('tfchat.accounts', JSON.stringify(accounts || {}));
-  localStorage.setItem('tfchat.blocked', JSON.stringify(blocked || []));
-  localStorage.setItem('tfchat.presence', JSON.stringify(presenceMap || {}));
-  // store conversations but limit messages per conv to 200
-  const convCopy = {};
-  Object.keys(conversationCache || {}).forEach(k=>{ const arr = conversationCache[k] || []; convCopy[k]=arr.slice(-200); });
-  localStorage.setItem('tfchat.conversations', JSON.stringify(convCopy));
-}
+    window.addEventListener('load', ()=>{ adjustLayoutForViewport(); });
+    window.addEventListener('resize', ()=>{ adjustLayoutForViewport(); });
 
-function convKey(a,b){ return `${a}|${b}`; }
-function ensureConversation(me17, other17){ const k = convKey(me17, other17); if(!conversationCache[k]) conversationCache[k]=[]; return conversationCache[k]; }
+    textarea.addEventListener('focus', ()=>{
+      setTimeout(()=> adjustLayoutForViewport(), 80);
+      setTimeout(()=> { if (!userIsScrolling) scrollToBottom(true); }, 150);
+    });
+    textarea.addEventListener('blur', ()=>{ setTimeout(()=> adjustLayoutForViewport(), 80); });
+    textarea.addEventListener('input', ()=>{ if (!userIsScrolling) scrollToBottom(true); });
 
-/* RENDER helpers */
-function initials(name){ if(!name) return 'U'; return name.split(' ').map(p=>p[0]).slice(0,2).join('').toUpperCase(); }
-function isActive(tf17){ const t = presenceMap[tf17]; return t && (Date.now() - t) < 60_000; }
+    window.addEventListener('gesturestart', e => e.preventDefault());
 
-function updateSettingsUI(){ profileNameInput.value = me.name || ''; profileTfidInput.value = (me.tf17 || '').replace(/^TF-?/i, '').slice(-7); profilePasswordInput.value = ''; }
+    if(!headerNameEl.textContent.trim()) headerNameEl.textContent = "Adam_D'H7";
+    if (typeof Notification !== 'undefined' && Notification && Notification.permission !== 'granted') Notification.requestPermission();
 
-function renderContacts(filter=''){
-  contactsListEl.innerHTML = '';
-  const q = (filter||'').toLowerCase().trim();
-  const list = contacts.filter(c=>{ if(!q) return true; return (c.name||'').toLowerCase().includes(q) || (c.tf17||'').toLowerCase().includes(q); });
-  if(list.length===0){ const div=document.createElement('div'); div.className='muted'; div.textContent='Pa gen kontak. Rechèch yon TFID oswa ajoute yon kontak.'; contactsListEl.appendChild(div); return; }
-  list.forEach(c=>{
-    const el=document.createElement('div'); el.className='contact'; el.dataset.tf17=c.tf17;
-    const avatarHtml = escapeHtml((c.name||formatTFShort(c.tf17) || '').slice(0,2));
-    const activeDot = isActive(c.tf17) ? ' • live' : '';
-    el.innerHTML = `<div class="avatar">${avatarHtml}</div><div class="meta"><div class="meta-top"><div class="name">${escapeHtml(c.name||formatTFShort(c.tf17)||'')}</div><div class="time">${c.lastTs? timeAgo(c.lastTs): ''}${activeDot}</div></div><div class="meta-bottom"><div class="snippet">${escapeHtml(c.lastMsg||'')}</div><div>${c.unread?'<span class="badge">'+c.unread+'</span>':''}</div></div></div>`;
-    el.addEventListener('click', ()=> openChat(c.tf17, c));
-    contactsListEl.appendChild(el);
-  });
-}
+    const STORAGE_KEY = 'tfai_sessions';
+    let sessions = JSON.parse(localStorage.getItem(STORAGE_KEY) || '[]');
+    let currentSession = sessions.length ? 0 : null;
+    function save(){ localStorage.setItem(STORAGE_KEY, JSON.stringify(sessions)); }
 
-function timeAgo(ts){ if(!ts) return ''; const diff=Math.floor((Date.now()-ts)/1000); if(diff<60) return diff+'s'; if(diff<3600) return Math.floor(diff/60)+'m'; if(diff<86400) return Math.floor(diff/3600)+'h'; return new Date(ts).toLocaleDateString(); }
+    function toggleSidebar(){
+      const sb = document.getElementById('sidebar');
+      sb.classList.toggle('active');
+      sb.setAttribute('aria-hidden', !sb.classList.contains('active'));
+    }
 
-/* NETWORK helpers (unchanged) */
-async function callJSON(url, opts = {}) { opts = Object.assign({}, opts); opts.headers = Object.assign({}, opts.headers || {}, { 'Accept': 'application/json' }); try { const r = await fetch(url, opts); const text = await r.text(); let json = null; try{ json = JSON.parse(text); }catch(e){} return { ok: r.ok, status: r.status, json, text }; } catch (err) { return { ok: false, error: err.message }; } }
-async function apiList(tf17){ const url = `${API_BASE}/api/list?tfid=${encodeURIComponent(tf17)}&name=${encodeURIComponent(FRONTEND_NAME)}`; const r = await callJSON(url); if(!r.ok) throw new Error(r.json?.error || r.text || `HTTP ${r.status}`); return r.json.rows || []; }
-async function apiAdd(recipient17, contentObj){ const body = { tfid: recipient17, name: FRONTEND_NAME, content: JSON.stringify(contentObj), source_url: location.origin }; const url = `${API_BASE}/api/add`; const r = await callJSON(url, { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify(body) }); if(!r.ok) { const errMsg = r.json?.error || r.text || `HTTP ${r.status}`; if(String(errMsg).toLowerCase().includes("frontend name not registered")) { const regOk = await registerFrontendIfNeeded(); if(regOk) { const r2 = await callJSON(url, { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify(body) }); if(!r2.ok) throw new Error(r2.json?.error || r2.text || `HTTP ${r2.status}`); return r2.json; } } throw new Error(errMsg); } return r.json; }
-async function registerFrontendIfNeeded(){ try { const url = `${API_BASE}/admin/register-frontend`; const payload = { name: FRONTEND_NAME, callback_url: location.origin }; const r = await callJSON(url, { method:"POST", headers:{"Content-Type":"application/json","x-api-token": ADMIN_API_TOKEN}, body: JSON.stringify(payload) }); return r.ok; } catch(e){ return false; } }
+    function newChat(){
+      sessions.unshift({ title: "Nouveau Chat", messages: [] });
+      currentSession = 0;
+      save(); renderList(); renderBox();
+      const sb = document.getElementById('sidebar'); if(!sb.classList.contains('active')) sb.classList.add('active');
+    }
 
-/* conversation helpers with persistence */
-function messageUniqueKey(m){ if(m.cid) return "cid:"+m.cid; if(m.id) return "id:"+m.id; return "temp:"+(m._tempKey || (m._tempKey = Math.random().toString(36).slice(2))); }
-function compareMessagesAsc(a,b){ const ta = parseDatePrefer(a._db_created_at, a.parsed_time); const tb = parseDatePrefer(b._db_created_at, b.parsed_time); if(ta !== tb) return ta - tb; if(a.id && b.id && a.id !== b.id) return Number(a.id) - Number(b.id); if(a.cid && b.cid && a.cid !== b.cid) return a.cid < b.cid ? -1 : 1; return 0; }
-function addOrUpdateMessageToCache(me17, other17, msg){ const key = convKey(me17, other17); const list = ensureConversation(me17, other17); const findIndex = msg.cid ? list.findIndex(x => x.cid && x.cid === msg.cid) : (msg.id ? list.findIndex(x => x.id && String(x.id) === String(msg.id)) : -1); if(findIndex !== -1){ list[findIndex] = Object.assign({}, list[findIndex], msg); } else { list.push(msg); } list.sort(compareMessagesAsc); saveState(); }
+    function renderList(){
+      const l = document.getElementById('chatList'); l.innerHTML = '';
+      sessions.forEach((s,i)=>{
+        const li = document.createElement('li'); li.textContent = s.title || 'Chat'; li.onclick = ()=>{ currentSession = i; renderBox(); toggleSidebar(); }; l.appendChild(li);
+      });
+    }
 
-async function loadConversation(me17, other17){ const key = convKey(me17, other17); conversationCache[key] = conversationCache[key] || []; const seen = new Set(); function pushRow(r, expectedFrom){ let parsed = null; try{ parsed = JSON.parse(r.content); }catch(e){ parsed = null; } const parsedFrom = parsed && parsed.from ? parsed.from : null; const parsedTime = parsed && parsed.time ? parsed.time : null; const parsedCid = parsed && parsed.cid ? parsed.cid : null; const parsedText = parsed && (parsed.text || parsed.message) ? (parsed.text || parsed.message) : (r.content || ""); if(!parsedFrom || parsedFrom !== expectedFrom) return; const m = { id: r.id || null, cid: parsedCid || null, from: parsedFrom, text: parsedText, parsed_time: parsedTime || null, _db_created_at: r.created_at || null, created_at: parsedTime || r.created_at || nowISO() }; const keyu = messageUniqueKey(m); if(seen.has(keyu)) return; seen.add(keyu); addOrUpdateMessageToCache(me17, other17, m); }
-  try{ const outRows = await apiList(other17); for(const r of outRows) pushRow(r, me17); }catch(e){ console.warn('LIST outgoing failed', e); }
-  try{ const inRows = await apiList(me17); for(const r of inRows) pushRow(r, other17); }catch(e){ console.warn('LIST incoming failed', e); }
-  renderConversation(me17, other17);
-}
+    // Utility: trim leading/trailing newlines but preserve internal ones
+    function trimNewlines(str){
+      if (typeof str !== 'string') return '';
+      return str.replace(/^\n+|\n+$/g, '');
+    }
 
-function renderConversation(me17, other17){ const key = convKey(me17, other17); const arr = conversationCache[key] ? [...conversationCache[key]] : []; messagesEl.innerHTML = ''; if(arr.length === 0){ messagesEl.innerHTML = `<div class="muted">Pa gen mesaj ankò.</div>`; } else { arr.sort(compareMessagesAsc); for(const m of arr){ const d = document.createElement('div'); d.className = 'msg ' + (m.from === me17 ? 'user' : 'bot'); const ts = m.created_at ? (new Date(m.created_at)).toLocaleString() : ''; d.innerHTML = `<div>${escapeHtml(m.text)}</div><div style="font-size:11px;color:var(--muted);margin-top:6px">${formatTFShort(m.from||'')} • ${ts}</div>`; messagesEl.appendChild(d); } } messagesEl.scrollTop = messagesEl.scrollHeight; }
+    // escape minimal to avoid XSS when using innerHTML in controlled way
+    function escapeHtml(str) {
+      return String(str)
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#39;');
+    }
 
-/* CHAT open/send (with block checks and history push for back button) */
-async function openChat(other17, contactObj=null){ if(!me.tf17){ if(!await promptForMeModal()) return; } currentPartner = { tf17: other17, name: (contactObj && contactObj.name) || null }; chatTitleEl.textContent = (currentPartner.name || formatTFShort(currentPartner.tf17)); const c = contacts.find(x=>x.tf17===other17); if(c){ c.unread = 0; saveState(); renderContacts(); } messagesEl.innerHTML = '<div class="muted">Chaje mesaj...</div>'; try{ await loadConversation(me.tf17, other17); }catch(e){ messagesEl.innerHTML = `<div class="muted">Pa kapab chaje mesaj: ${escapeHtml(e.message||e)}</div>`; } showChatModal(); // push history state so back button works
-  history.pushState({chatOpen:true, tf17: other17}, '', '#chat='+other17);
-}
-function showChatModal(){ chatModalEl.style.display='block'; setTimeout(()=> chatTextEl?.focus(), 150); }
-function hideChatModal(){ chatModalEl.style.display='none'; currentPartner = null; // if history has hash, go back
-  if(location.hash && location.hash.startsWith('#chat=')) history.back(); }
+    // Format message: code spans, bold (any # of *), underline (~)
+    // NOTE: removed list conversion (no - or * at start -> list)
+    function formatMessageText(raw) {
+      if (!raw) return '';
+      // normalize line endings
+      let text = String(raw).replace(/\r\n/g, '\n').replace(/\r/g, '\n');
 
-async function sendMessageFromModal(){ const txt = (chatTextEl?.value || '').trim(); if(!txt || !currentPartner) return; if(!me.tf17){ alert('Pa gen TFID pou itilizatè a. Mete li nan Paramètres.'); return; }
-  // prevent sending if we blocked target
-  if(blocked.includes(currentPartner.tf17)){ alert('Ou blok kontak sa — débloke avan voye mesaj.'); return; }
-  const recipient17 = currentPartner.tf17; const cid = makeCid(); const payload = { type:'text', from: me.tf17, text: txt, time: (new Date()).toISOString(), cid };
-  addOrUpdateMessageToCache(me.tf17, recipient17, { id:null, cid, from: me.tf17, text: txt, parsed_time: payload.time, _db_created_at:null, created_at: payload.time, _optimistic:true }); renderConversation(me.tf17, recipient17); chatTextEl.value=''; const c = contacts.find(x=>x.tf17===recipient17); if(c){ c.lastMsg = txt; c.lastTs = Date.now(); saveState(); renderContacts(); }
-  try{ await apiAdd(recipient17, payload); startShortPollForMessage(recipient17, cid); }catch(e){ alert('Envoi echwe: ' + (e.message||e)); }
-}
-function startShortPollForMessage(target17, cid){ let tries=0; const maxTries=6; const interval=1200; const attempt = async ()=>{ tries++; try{ const rows = await apiList(target17); const found = rows.find(r=>{ try{ const p = JSON.parse(r.content); return p && p.cid===cid; }catch(e){ return false; } }); if(found){ await loadConversation(me.tf17, target17); return true; } }catch(e){} if(tries<maxTries) setTimeout(attempt, interval); }; attempt(); }
+      // escape everything first
+      text = escapeHtml(text);
 
-/* CONTACT helpers */
-function ensureContactInList(tf17, name){ let c = contacts.find(x=>x.tf17===tf17); if(!c){ c = { tf17, short: formatTFShort(tf17), name: name||null, unread:0, lastMsg:'', lastTs: Date.now() }; contacts.unshift(c); saveState(); renderContacts(); } return c; }
+      // protect inline code spans (`code`) by replacing with placeholders
+      const codeSpans = [];
+      text = text.replace(/`([^`]+?)`/g, (m, p1) => {
+        const html = `<span class="inline-code">${escapeHtml(p1)}</span>`;
+        codeSpans.push(html);
+        return `§§CODE${codeSpans.length - 1}§§`;
+      });
 
-/* PROMPT FOR ME (settings modal with password logic) */
-async function promptForMeModal(){ updateSettingsUI(); settingsModal.style.display='flex'; profileNameInput.focus(); return new Promise(resolve=>{
-  async function onSave(){ const nameVal = profileNameInput.value.trim(); const short = normalizeInputToDigits(profileTfidInput.value.trim()); if(!short || short.length<7){ alert('TFID invalide — antre 7 chif.'); return; } const tf17 = to17(short.slice(-7)); // check accounts
-    const existing = accounts[tf17];
-    if(existing && existing.passwordHash){ const pw = prompt('Compte deja gen modpas. Antre modpas:'); if(!pw) return; const h = await sha256Hex(pw); if(h !== existing.passwordHash){ alert('Modpas pa kòrèk'); return; } // allow login
-      me.name = existing.name || nameVal || me.name || 'Utilisateur'; me.short = short.slice(-7); me.tf17 = tf17; saveState(); settingsModal.style.display='none'; cleanup(); registerFrontendIfNeeded().then(()=>{ if(ws && ws.readyState===WebSocket.OPEN){ try{ ws.send(JSON.stringify({ type:'subscribe', tfid: me.tf17 })); }catch(e){} } else connectWS(); }); resolve(true); return; }
-    // not existing with password — create or update
-    me.name = nameVal || me.name || 'Utilisateur'; me.short = short.slice(-7); me.tf17 = tf17; // if user provided password in field -> save locally
-    const pwField = profilePasswordInput.value || '';
-    if(pwField.trim()){ const hash = await sha256Hex(pwField.trim()); accounts[me.tf17] = { name: me.name, passwordHash: hash }; }
-    saveState(); settingsModal.style.display='none'; cleanup(); registerFrontendIfNeeded().then(()=>{ if(ws && ws.readyState===WebSocket.OPEN){ try{ ws.send(JSON.stringify({ type:'subscribe', tfid: me.tf17 })); }catch(e){} } else connectWS(); }); resolve(true);
-  }
-  function onCancel(){ settingsModal.style.display='none'; cleanup(); resolve(false); }
-  function cleanup(){ profileSaveBtn.removeEventListener('click', onSave); settingsCancelBtn.removeEventListener('click', onCancel); }
-  profileSaveBtn.addEventListener('click', onSave); settingsCancelBtn.addEventListener('click', onCancel);
-}); }
+      // bold: any same run of asterisks surrounding text -> bold
+      text = text.replace(/(\*{1,})([\s\S]*?)\1/g, (m, stars, content) => {
+        return `<strong>${content}</strong>`;
+      });
 
-/* WEBSOCKET & presence */
-function connectWS(){ if(!me.tf17){ wsStatusEl.textContent='WS: non connecté (pas de TFID)'; return; } try{ ws = new WebSocket(WS_URL); }catch(e){ scheduleReconnect(); return; } ws.onopen = ()=>{ wsStatusEl.textContent='WS: connecté'; try{ ws.send(JSON.stringify({ type:'subscribe', tfid: me.tf17 })); }catch(e){} }; ws.onmessage = (ev)=>{ try{ const data = JSON.parse(ev.data); if(data.type === 'subscribed') return; if(data.type === 'message'){ const payload = data; let parsed = null; try{ parsed = JSON.parse(payload.content); }catch(e){ parsed=null; } if(!parsed || !parsed.from) return; const recipient = payload.tfid || null; const from = parsed.from; const other = (recipient === me.tf17) ? from : recipient; if(!other) return; const created = parsed.time || payload.created_at || nowISO(); const msgObj = { id: payload.id || null, cid: parsed.cid || null, from, text: parsed.text || parsed.message || '', parsed_time: parsed.time || null, _db_created_at: payload.created_at || null, created_at: created };
-          // presence update when we receive message from someone
-          presenceMap[from] = Date.now(); saveState();
-          // if we blocked the sender, ignore the message locally
-          if(blocked.includes(from)) return;
-          addOrUpdateMessageToCache(me.tf17, other, msgObj);
-          if(currentPartner && currentPartner.tf17 === other){ renderConversation(me.tf17, other); } else if(recipient === me.tf17){ const c = ensureContactInList(other, null); c.unread = (c.unread||0)+1; c.lastMsg = msgObj.text; c.lastTs = Date.now(); saveState(); renderContacts(); }
+      // underline ~text~
+      text = text.replace(/~(.*?)~/g, (m, p1) => `<u>${p1}</u>`);
+
+      // restore code spans placeholders
+      text = text.replace(/§§CODE(\d+)§§/g, (m, idx) => codeSpans[Number(idx)] || '');
+
+      // convert newlines to <br>
+      text = text.split('\n').map(ln => ln === '' ? '<br>' : ln).join('<br>');
+
+      return text;
+    }
+
+    /* copy only code content (inside code card) - improved:
+       - clicking icon or clicking the label header copies code
+       - uses delegated events too
+    */
+    async function copyCodeFromCard(cardEl) {
+      try {
+        if (!cardEl) return;
+        const body = cardEl.querySelector('.code-body');
+        if (!body) return;
+        const codeContent = body.textContent || '';
+        if (!codeContent) return;
+        await navigator.clipboard.writeText(codeContent);
+
+        // visual feedback on button if present
+        const btn = cardEl.querySelector('.code-copy-btn');
+        if (btn) {
+          const prevHtml = btn.innerHTML;
+          btn.innerHTML = '<svg class="code-copy-icon" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true"><path d="M9 12l2 2 4-4" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>';
+          setTimeout(()=> { try { btn.innerHTML = prevHtml; } catch(e){} }, 1200);
         }
-      }catch(err){ console.warn('WS parse err', err); } };
-  ws.onclose = ()=>{ wsStatusEl.textContent='WS: déconnecté'; scheduleReconnect(); };
-  ws.onerror = (e)=>{ console.warn('WS error', e); wsStatusEl.textContent='WS: erreur'; try{ ws.close(); }catch(e){} };
-}
-function scheduleReconnect(){ if(reconnectTimer) return; reconnectTimer = setTimeout(()=>{ reconnectTimer = null; connectWS(); }, 3000); }
+      } catch (e) {
+        console.warn('copyCodeFromCard fail', e);
+      }
+    }
 
-/* SEARCH handling */
-async function performSearchQuery(raw){ if(!raw) return; const digits = normalizeInputToDigits(raw); if(!digits){ renderContacts(raw); return; } if(digits.length < 7){ alert('TFID dwe gen omwen 7 chif.'); return; } const short7 = digits.slice(-7); const tf17 = to17(short7); let local = contacts.find(c=>c.tf17===tf17); if(local){ openChat(local.tf17, local); return; } try{ const rows = await apiList(tf17); if(rows && rows.length>0){ const last = rows[rows.length-1] || rows[0]; let lastMsg=''; try{ const p = JSON.parse(last.content); lastMsg = p.text || p.message || last.content; }catch(e){ lastMsg = last.content || ''; } const c = { tf17, name: formatTFShort(short7), lastMsg, lastTs: Date.now(), unread:0 }; contacts.unshift(c); saveState(); renderContacts(); openChat(c.tf17, c); return; } else { if(confirm('Pa jwenn done sou servèr. Kreye kontak lokal pou TFID sa a?')){ const c = { tf17, name: formatTFShort(short7), lastMsg:'', lastTs:Date.now(), unread:0 }; contacts.unshift(c); saveState(); renderContacts(); openChat(c.tf17, c); } } }catch(err){ alert('Erè lè w ap chèche sou servèr: ' + (err.message||err)); } }
+    // Delegated click: copy when clicking the button, icon, or the left label area
+    document.addEventListener('click', (ev) => {
+      const btn = ev.target.closest('.code-copy-btn');
+      if (btn) {
+        const card = btn.closest('.code-card');
+        if (card) copyCodeFromCard(card);
+        return;
+      }
+      // If user clicks icon inside
+      const icon = ev.target.closest('.code-copy-icon');
+      if (icon) {
+        const card = icon.closest('.code-card');
+        if (card) copyCodeFromCard(card);
+        return;
+      }
+      // If user clicks the label (left side) copy too (convenience)
+      const lbl = ev.target.closest('.code-header .label');
+      if (lbl) {
+        const card = lbl.closest('.code-card');
+        if (card) copyCodeFromCard(card);
+        return;
+      }
+    });
 
-/* CONTACT DETAILS panel actions */
-function openContactPanel(tf17){ const contact = contacts.find(c=>c.tf17===tf17) || { tf17 }; cpName.textContent = contact.name || formatTFShort(tf17); cpTfid.textContent = formatTFShort(tf17); cpActive.style.display = isActive(tf17) ? 'block' : 'none'; cpAddContact.textContent = contacts.find(c=>c.tf17===tf17) ? 'Edit Kontakt' : 'Ajoute Kontakt'; cpBlockToggle.textContent = blocked.includes(tf17) ? 'Débloque' : 'Bloque'; contactPanelWrap.style.display='flex'; }
-cpClose.addEventListener('click', ()=> { contactPanelWrap.style.display='none'; });
-cpAddContact.addEventListener('click', ()=>{ const tf17 = (cpTfid.textContent || '').replace(/[^0-9]/g,''); const name = prompt('Nom pou kontak (optionel):'); const c = ensureContactInList(tf17, name || null); if(name) c.name = name; saveState(); renderContacts(); contactPanelWrap.style.display='none'; openChat(tf17, c); });
-cpBlockToggle.addEventListener('click', ()=>{ const tf17 = (cpTfid.textContent || '').replace(/[^0-9]/g,''); if(blocked.includes(tf17)){ blocked = blocked.filter(x=>x!==tf17); alert('Kontak débloqué'); } else { if(!confirm('Ou vle vrèman bloke kontak sa? Yo pap kapab wè ou lokalman.')) return; blocked.push(tf17); alert('Kontak bloqué lokalman'); } saveState(); renderContacts(); contactPanelWrap.style.display='none'; });
+    function renderBox(){
+      chatBox.innerHTML = '';
+      if (currentSession === null) {
+        chatBox.innerHTML = '<div style="padding:20px;color:var(--ai-text)">Aucun chat — ouvri sidebar epi klike Nouveau Chat pou kòmanse</div>';
+        return;
+      }
+      const sess = sessions[currentSession];
+      sess.messages.forEach((m, idx) => {
+        const wrap = document.createElement('div');
+        wrap.setAttribute('data-idx', String(idx));
+        if (m.sender === 'thinking') {
+          wrap.className = 'message bot thinking';
+          const content = document.createElement('div'); content.className = 'content';
+          content.innerHTML = '<div class="thinking-dots"><span></span><span></span><span></span></div>';
+          wrap.appendChild(content);
+        } else {
+          wrap.className = 'message ' + (m.sender === 'user' ? 'user' : 'bot');
 
-/* UI events */
-document.getElementById('chatBack')?.addEventListener('click', ()=> hideChatModal());
-sendBtnEl?.addEventListener('click', sendMessageFromModal);
-chatTextEl?.addEventListener('keydown', (e)=>{ if(e.key==='Enter'){ e.preventDefault(); sendMessageFromModal(); } });
-searchInput?.addEventListener('keydown', async (e)=>{ if(e.key==='Enter'){ e.preventDefault(); await performSearchQuery(searchInput.value.trim()); } });
-searchBtn?.addEventListener('click', async ()=>{ await performSearchQuery(searchInput.value.trim()); });
-document.getElementById('settingsBtn')?.addEventListener('click', ()=> { updateSettingsUI(); settingsModal.style.display='flex'; });
-profileSaveBtn?.addEventListener('click', async ()=>{ /* same flow as modal save - quick handler here */ const newName = profileNameInput.value.trim(); const short = normalizeInputToDigits(profileTfidInput.value.trim()); if(!short || short.length<7){ alert('TFID pa valab — antre 7 chif.'); return; } const tf17 = to17(short.slice(-7)); const pw = profilePasswordInput.value.trim(); // if account exists and has password, verify
-  const existing = accounts[tf17]; if(existing && existing.passwordHash){ const given = prompt('Antre modpas pou reklamasyon kont sa:'); if(!given) return; const h = await sha256Hex(given); if(h !== existing.passwordHash){ alert('Modpas pa kòrèk'); return; } }
-  me.name = newName || me.name; me.short = short.slice(-7); me.tf17 = tf17; if(pw){ const hash = await sha256Hex(pw); accounts[tf17] = { name: me.name, passwordHash: hash }; }
-  saveState(); settingsModal.style.display='none'; await registerFrontendIfNeeded(); if(ws && ws.readyState===WebSocket.OPEN){ try{ ws.send(JSON.stringify({ type:'subscribe', tfid: me.tf17 })); }catch(e){} } else connectWS(); });
-settingsCancelBtn?.addEventListener('click', ()=> settingsModal.style.display='none');
+          // If message contains any § code markers (legacy code-card sections)
+          if (typeof m.text === 'string' && m.text.includes('§')) {
+            const parts = m.text.split(/§/);
+            let codeCounter = 0;
+            for (let i = 0; i < parts.length; i++) {
+              if (i % 2 === 0) {
+                // plain text
+                const rawTxt = parts[i];
+                const txtClean = trimNewlines(rawTxt);
+                if (txtClean && txtClean.trim()) {
+                  const p = document.createElement('div');
+                  p.className = 'content';
+                  // Use formatter so inline markup still works in those plain segments
+                  p.innerHTML = formatMessageText(txtClean);
+                  wrap.appendChild(p);
+                }
+              } else {
+                // code segment -> create a code card
+                const rawCode = parts[i];
+                const codeText = trimNewlines(rawCode);
 
-/* history popstate handling: close chat when user presses back */
-window.addEventListener('popstate', (ev)=>{
-  if(ev.state && ev.state.chatOpen){ // if state indicates chat open, keep
-  } else { // otherwise close chat modal
-    if(chatModalEl.style.display === 'block') hideChatModal();
+                const card = document.createElement('div');
+                card.className = 'code-card';
+                card.setAttribute('data-msg-idx', String(idx));
+                card.setAttribute('data-code-idx', String(codeCounter));
+
+                const header = document.createElement('div');
+                header.className = 'code-header';
+
+                const left = document.createElement('div');
+                left.className = 'label';
+                left.innerHTML = '<svg style="width:14px;height:14px;opacity:0.9;margin-right:4px" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M9 12l2 2 4-4" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg><span>Copier</span>';
+
+                const right = document.createElement('div');
+                right.className = 'right';
+
+                const btn = document.createElement('button');
+                btn.className = 'code-copy-btn';
+                btn.title = 'Copier le code';
+                btn.type = 'button';
+                btn.innerHTML = '<svg class="code-copy-icon" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true"><path d="M16 3H7a2 2 0 0 0-2 2v11" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/><rect x="9" y="7" width="11" height="11" rx="2" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>';
+
+                right.appendChild(btn);
+                header.appendChild(left);
+                header.appendChild(right);
+
+                const body = document.createElement('div');
+                body.className = 'code-body';
+                body.textContent = codeText;
+
+                card.appendChild(header);
+                card.appendChild(body);
+                wrap.appendChild(card);
+
+                codeCounter++;
+              }
+            }
+          } else {
+            // plain message without any legacy § markers
+            const txtClean = trimNewlines(m.text);
+            if (txtClean && txtClean.trim()) {
+              const c = document.createElement('div'); c.className = 'content';
+              // use innerHTML with our formatter (formatter escapes text internally)
+              c.innerHTML = formatMessageText(txtClean);
+              wrap.appendChild(c);
+            }
+            if (m.sender === 'bot' && m.ts) {
+              const ts = document.createElement('div'); ts.className = 'timestamp';
+              const diff = Math.floor((Date.now() - m.ts) / 1000);
+              ts.textContent = diff < 60 ? `${diff}s` : `${Math.floor(diff/60)}m`;
+              wrap.appendChild(ts);
+            }
+          }
+        }
+        chatBox.appendChild(wrap);
+      });
+
+      // Auto-scroll only if user IS NOT actively scrolling
+      if (!userIsScrolling) {
+        scrollToBottom();
+      } else {
+        // show "go to bottom" badge
+        if (chatBox.scrollHeight - chatBox.scrollTop - chatBox.clientHeight > 80) {
+          scrollBadge.classList.add('show');
+        } else {
+          scrollBadge.classList.remove('show');
+        }
+      }
+    }
+
+    // When user clicks badge, jump to bottom and re-enable auto-scroll
+    scrollBadge.addEventListener('click', () => {
+      scrollBadge.classList.remove('show');
+      userIsScrolling = false;
+      scrollToBottom(false);
+    });
+
+    textarea.addEventListener('paste', (e)=>{
+      setTimeout(()=> {
+        const val = textarea.value;
+        if (!val || !val.trim()) return;
+        // don't auto-submit if already sending
+        if (isSending) return;
+        if (typeof chatForm.requestSubmit === 'function') chatForm.requestSubmit();
+        else chatForm.dispatchEvent(new Event('submit', { cancelable: true }));
+      }, 20);
+    });
+
+    // robust extractor (unchanged)
+    function collectStrings(value) {
+      if (value == null) return '';
+      if (typeof value === 'string') return value;
+      if (typeof value === 'number' || typeof value === 'boolean') return String(value);
+      if (Array.isArray(value)) return value.map(v => collectStrings(v)).join('');
+      if (typeof value === 'object') {
+        let out = '';
+        for (const k of Object.keys(value)) out += collectStrings(value[k]);
+        return out;
+      }
+      return '';
+    }
+    function extractAssistantTextFromResp(j) {
+      if (!j) return null;
+      if (Array.isArray(j.choices) && j.choices.length) {
+        const c = j.choices[0];
+        if (c.message && typeof c.message.content === 'string' && c.message.content.trim()) return c.message.content.trim();
+        if (c.message && c.message.content) {
+          const s = collectStrings(c.message.content).trim();
+          if (s) return s;
+        }
+        if (typeof c.text === 'string' && c.text.trim()) return c.text.trim();
+        if (c.delta) {
+          const s3 = collectStrings(c.delta).trim();
+          if (s3) return s3;
+        }
+        try { return JSON.stringify(c).slice(0, 2000); } catch (e) { return null; }
+      }
+      if (typeof j.assistant === 'string' && j.assistant.trim()) return j.assistant.trim();
+      if (typeof j.text === 'string' && j.text.trim()) return j.text.trim();
+      const fallback = collectStrings(j).trim();
+      if (fallback) return fallback;
+      return null;
+    }
+
+    function removeAllTimestamps() {
+      const ts = chatBox.querySelectorAll('.timestamp');
+      ts.forEach(el => el.remove());
+    }
+
+    // track user-initiated scrolling so we don't auto-jump
+    let userIsScrolling = false;
+    let userScrollTimeout = null;
+    chatBox.addEventListener('scroll', (ev) => {
+      userIsScrolling = true;
+      scrollBadge.classList.add('show');
+
+      const remaining = chatBox.scrollHeight - chatBox.scrollTop - chatBox.clientHeight;
+      if (remaining < 80) {
+        userIsScrolling = false;
+        scrollBadge.classList.remove('show');
+      }
+
+      if (userScrollTimeout) clearTimeout(userScrollTimeout);
+      userScrollTimeout = setTimeout(()=> {
+        const rem = chatBox.scrollHeight - chatBox.scrollTop - chatBox.clientHeight;
+        if (rem < 80) {
+          userIsScrolling = false;
+          scrollBadge.classList.remove('show');
+        }
+      }, 1200);
+    }, { passive: true });
+
+    // Keyboard scrolling when textarea is NOT focused
+    document.addEventListener('keydown', (e) => {
+      const active = document.activeElement;
+      if (active === textarea || active && active.tagName === 'INPUT' ) return;
+
+      const key = e.key;
+      let handled = false;
+      if (key === 'ArrowDown') {
+        chatBox.scrollBy({ top: 60, behavior: 'smooth' });
+        handled = true;
+      } else if (key === 'ArrowUp') {
+        chatBox.scrollBy({ top: -60, behavior: 'smooth' });
+        handled = true;
+      } else if (key === 'PageDown') {
+        chatBox.scrollBy({ top: chatBox.clientHeight * 0.9, behavior: 'smooth' });
+        handled = true;
+      } else if (key === 'PageUp') {
+        chatBox.scrollBy({ top: -chatBox.clientHeight * 0.9, behavior: 'smooth' });
+        handled = true;
+      } else if (key === 'Home') {
+        chatBox.scrollTo({ top: 0, behavior: 'smooth' });
+        handled = true;
+      } else if (key === 'End') {
+        chatBox.scrollTo({ top: chatBox.scrollHeight, behavior: 'smooth' });
+        handled = true;
+      }
+      if (handled) {
+        e.preventDefault();
+        userIsScrolling = true;
+        scrollBadge.classList.add('show');
+      }
+    });
+
+    // Save previous send button html to restore after disabling spinner
+    const sendButtonOriginalHtml = sendButton.innerHTML;
+
+    chatForm.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      if (isSending) return; // prevent re-entrancy
+      const raw = textarea.value;
+      const text = (typeof raw === 'string') ? raw.trim() : '';
+      if (!text) return;
+
+      // set sending flag + UI feedback
+      isSending = true;
+      try { sendButton.disabled = true; sendButton.setAttribute('aria-disabled','true'); } catch(e){}
+      // small spinner icon in place of send arrow
+      try {
+        sendButton.innerHTML = '<svg viewBox=\"0 0 50 50\" width=\"20\" height=\"20\" xmlns=\"http://www.w3.org/2000/svg\" aria-hidden=\"true\"><g transform=\"translate(25,25)\"><circle cx=\"0\" cy=\"0\" r=\"10\" stroke=\"currentColor\" stroke-width=\"4\" fill=\"none\" stroke-opacity=\"0.18\"></circle><path d=\"M10 0A10 10 0 0 1 0 10\" stroke=\"currentColor\" stroke-width=\"4\" stroke-linecap=\"round\" fill=\"none\"><animateTransform attributeName=\"transform\" type=\"rotate\" from=\"0\" to=\"360\" dur=\"0.9s\" repeatCount=\"indefinite\"/></path></g></svg>';
+      } catch(e){}
+
+      removeAllTimestamps();
+      if (currentSession === null) newChat();
+      const sess = sessions[currentSession];
+      sess.messages.push({ sender: 'user', text, ts: Date.now() });
+      if (sess.messages[0] && typeof sess.messages[0].text === 'string') sess.title = sess.messages[0].text.slice(0,100);
+      save(); renderList(); renderBox();
+      textarea.value = '';
+
+      // Add thinking only if there is no existing thinking message
+      if (!sess.messages.some(m => m.sender === 'thinking')) {
+        const thinking = { sender: 'thinking', ts: Date.now() };
+        sess.messages.push(thinking); save(); renderBox();
+      }
+
+      let assistantPushed = false;
+
+      try {
+        let tfid = localStorage.getItem('tfid');
+        if (!tfid) {
+          const ru = await fetch('/user', { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({}) });
+          if (!ru.ok) throw new Error('/user failed');
+          const ju = await ru.json(); tfid = ju.tfid; localStorage.setItem('tfid', tfid);
+        }
+
+        let sessionId = localStorage.getItem('currentSessionId');
+        if (!sessionId) {
+          const rs = await fetch('/session', { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({ tfid }) });
+          if (!rs.ok) throw new Error('/session failed');
+          const js = await rs.json(); sessionId = js.sessionId; localStorage.setItem('currentSessionId', sessionId);
+        }
+
+        const r = await fetch('/message', {
+          method: 'POST',
+          headers: {'Content-Type':'application/json'},
+          body: JSON.stringify({ tfid: localStorage.getItem('tfid'), sessionId: localStorage.getItem('currentSessionId'), text })
+        });
+
+        if (!r.ok) {
+          const txt = await r.text().catch(()=>null);
+          console.warn('/message returned not ok', r.status, txt && txt.slice ? txt.slice(0,200) : txt);
+          throw new Error('/message fail');
+        }
+
+        const jr = await r.json();
+        const idx = sess.messages.findIndex(m => m.sender === 'thinking'); if (idx > -1) sess.messages.splice(idx, 1);
+
+        let assistantText = null;
+        if (jr && typeof jr.assistant === 'string' && jr.assistant.trim()) assistantText = jr.assistant.trim();
+        if (!assistantText && jr && jr.assistant_rendered) assistantText = jr.assistant_rendered;
+        if (!assistantText && jr && jr.raw) assistantText = extractAssistantTextFromResp(jr.raw);
+        if (!assistantText && jr) assistantText = extractAssistantTextFromResp(jr);
+
+        if (!assistantText || !assistantText.trim()) assistantText = '(Repons pa klè)';
+
+        sess.messages.push({ sender: 'bot', text: assistantText, ts: Date.now() });
+        assistantPushed = true;
+        save(); renderBox();
+
+        // If user not looking at page, show notification
+        if (typeof document !== 'undefined' && document.hidden && typeof Notification !== 'undefined' && Notification.permission === 'granted') {
+          new Notification("Adam_D'H7", { body: 'Nouvo mesaj TF-Chat' });
+        }
+
+      } catch (err) {
+        console.warn('Error sending message or parsing response, will fallback. Err:', err && err.message ? err.message : err);
+      } finally {
+        try {
+          const idx2 = sess.messages.findIndex(m => m.sender === 'thinking');
+          if (idx2 !== -1) sess.messages.splice(idx2, 1);
+        } catch(e){}
+        const lastBot = [...sess.messages].reverse().find(m => m.sender === 'bot');
+        if (!lastBot) {
+          sess.messages.push({
+            sender: 'bot',
+            text: "Adam_D'H7 est nouveau alors des fois il vaudrait mieux suprime les données, ou c'est peut-être que j'ai pas trouvé de réponse.",
+            ts: Date.now()
+          });
+        }
+        save(); renderBox();
+
+        // re-enable send button + clear sending flag
+        isSending = false;
+        try {
+          sendButton.disabled = false;
+          sendButton.removeAttribute('aria-disabled');
+          sendButton.innerHTML = sendButtonOriginalHtml;
+        } catch(e){}
+      }
+    });
+
+    // Make Enter insert newline normally (so user can line-break). Keep previous custom behaviour: Enter -> newline
+    textarea.addEventListener('keydown', (e)=>{
+      if (e.key === 'Enter' && !e.shiftKey) {
+        // previously prevented submit; keep newline behaviour
+        e.preventDefault();
+        const s = textarea.selectionStart, v = textarea.value;
+        textarea.value = v.slice(0,s) + '\n' + v.slice(s);
+        textarea.selectionStart = textarea.selectionEnd = s+1;
+      }
+    });
+
+    if (sessions.length) { renderList(); renderBox(); }
+    adjustLayoutForViewport();
+
+    // Keep header visible when mobile keyboard opens using visualViewport
+    if (window.visualViewport) {
+      const onViewportChange = () => {
+        const vv = window.visualViewport;
+        // move header down to remain visible (some mobile browsers change offsetTop)
+        headerEl.style.top = (vv.offsetTop || 0) + 'px';
+
+        // Calculate keyboard overlap and adjust chatBox bottom so form sits above keyboard
+        const keyboardHeight = window.innerHeight - vv.height - (vv.offsetTop || 0);
+        const formH = formEl.offsetHeight || 84;
+        const bottomPad = Math.max(formH, formH + keyboardHeight);
+        chatBox.style.bottom = bottomPad + 'px';
+
+        // if textarea is focused, ensure we keep bottom in view
+        if (document.activeElement === textarea) {
+          setTimeout(()=> {
+            if (!userIsScrolling) scrollToBottom(true);
+          }, 100);
+        }
+      };
+      window.visualViewport.addEventListener('resize', onViewportChange);
+      window.visualViewport.addEventListener('scroll', onViewportChange);
+      window.addEventListener('resize', onViewportChange);
+    }
+
+    // service worker registration kept as before
+    window.addEventListener('load', () => {
+      if ('serviceWorker' in navigator) {
+        navigator.serviceWorker.register('/sw.js', { scope: '/' })
+          .then(reg => {
+            navigator.serviceWorker.ready.then(regReady => {
+              if (regReady.active && regReady.active.postMessage) {
+                regReady.active.postMessage({ type: 'LIST_CACHES' });
+              }
+            });
+          })
+          .catch(()=>{/* silent */});
+
+        navigator.serviceWorker.addEventListener('message', ()=>{/* silent */});
+      }
+    });
+
+    // --- Nouvelle fonction : Efase tout ---
+    function eraseAll() {
+      const ok = confirm("Efase tout ?\nSa ap efase tout nan localStorage epi rafrechi paj la. Èske ou sèten ?");
+      if (!ok) return;
+      try {
+        // Efface tout localStorage
+        localStorage.clear();
+      } catch (e) {
+        console.warn('Erreur lors du nettoyage du localStorage', e);
+      } finally {
+        // reload la page pou vid UI
+        location.reload();
+      }
+    }
+    // --- fin efase tout ---
+  </script>
+  <script type='text/javascript' src='//pantherinvincible.com/8b/a7/97/8ba7975b08a44053d6bd63132eea2d12.js'></script>
+  <script>
+  // Chwazi header logo la
+  const headerLogo = document.getElementById('headerName');
+
+  if (headerLogo) {
+    // Chanje cursor pou desktop pou montre li klikeable
+    headerLogo.style.cursor = 'pointer';
+
+    // Add click event pou desktop
+    headerLogo.addEventListener('click', () => {
+      window.location.href = 'https://www.paypal.com/ncp/payment/4HGXXFZLZHJDY';
+    });
+
+    // Add touch event pou mobil
+    headerLogo.addEventListener('touchstart', () => {
+      window.location.href = 'https://www.paypal.com/ncp/payment/4HGXXFZLZHJDY';
+    });
   }
-});
-
-/* boot */
-function boot(){ renderContacts(); if(me.tf17){ connectWS(); } else { setTimeout(()=> { promptForMeModal(); }, 250); } }
-boot();
-
-/* expose debug */
-window._tf_contacts = contacts; window._tf_me = me; window._tf_conv = conversationCache;
-</script></body>
+  </script>
+  <script type='text/javascript' src='//pantherinvincible.com/1d/e3/21/1de321cf7681c76a64e7cdb2ab95a037.js'></script>
+</body>
   </html>
