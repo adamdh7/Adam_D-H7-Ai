@@ -92,12 +92,9 @@
 
 <script>
 (() => {
-  // ---- CONFIG ----
   const API = 'https://adamdh7.adamdh7.workers.dev/';
   const TF_KEY = 'tfid_v1';
   const MAX_TEXT = 7777777;
-
-  // ---- UI refs ----
   const chatBox = document.getElementById('chatBox');
   const userInput = document.getElementById('userInput');
   const sendBtn = document.getElementById('sendBtn');
@@ -110,25 +107,25 @@
   const downloadImgBtn = document.getElementById('downloadImgBtn');
   const closeModalBtn = document.getElementById('closeModalBtn');
 
-  // ---- state ----
   let TFID = null;
+  let recording = false;
   let recorder = null;
   let recordedChunks = [];
-  let recording = false;
   let recordStart = 0;
   let recordTimer = null;
   let maxRecordSec = 60;
 
-  // ---- helpers ----
   function softBreak(s, n=40){ if(!s) return ''; return s.replace(new RegExp(`([^\\s]{${n}})`, 'g'), '$1<wbr>'); }
   function escapeHtml(s){ if(!s) return ''; return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
-  function fetchWithTimeout(url, options={}, timeout=420000){ const controller = new AbortController(); options.signal = controller.signal; const timer = setTimeout(()=> controller.abort(), timeout); return fetch(url, options).then(res => { clearTimeout(timer); return res; }).catch(err => { clearTimeout(timer); throw err; }); }
 
-  // ---- rendering (NO localStorage of messages) ----
-  function clearMessages(){ chatBox.innerHTML = ''; }
-  function renderMessage({who='bot', text=null, images=null, audioUrl=null, ts=Date.now()}) {
+  // only store TFID in localStorage
+  function getStoredTfid(){ try{ return localStorage.getItem(TF_KEY); }catch(e){ return null; } }
+  function setStoredTfid(tf){ try{ localStorage.setItem(TF_KEY, tf); }catch(e){} }
+
+  function renderMessage({id=null,who='bot', text=null, images=null, audioUrl=null, ts=Date.now(), persist=false}) {
     const msg = document.createElement('div');
     msg.className = 'message ' + (who === 'user' ? 'user' : 'bot');
+    msg.dataset.id = id || ('m_'+Date.now()+'_'+Math.floor(Math.random()*1000));
     if(text){
       const b = document.createElement('div');
       b.className = 'bubble ' + (who === 'user' ? 'user' : 'bot');
@@ -136,70 +133,92 @@
       msg.appendChild(b);
     }
     if(Array.isArray(images) && images.length){
-      const container = document.createElement('div'); container.className = 'message-images';
+      const container = document.createElement('div');
+      container.className = 'message-images';
       if(images.length === 1){
-        const im = document.createElement('img'); im.className='img-large'; im.src = images[0]; im.alt='generated image'; im.loading='lazy';
-        im.addEventListener('click', ()=> openModal(images[0])); container.appendChild(im);
+        const im = document.createElement('img');
+        im.className = 'img-large';
+        im.src = images[0];
+        im.alt = 'generated image';
+        im.loading = 'lazy';
+        im.addEventListener('click', ()=> openModal(images[0]));
+        container.appendChild(im);
       } else {
-        images.forEach(src => { const im = document.createElement('img'); im.className='img-small'; im.src = src; im.alt='generated image'; im.loading='lazy'; im.addEventListener('click', ()=> openModal(src)); container.appendChild(im); });
+        images.forEach(src => {
+          const im = document.createElement('img');
+          im.className = 'img-small';
+          im.src = src;
+          im.alt = 'generated image';
+          im.loading = 'lazy';
+          im.addEventListener('click', ()=> openModal(src));
+          container.appendChild(im);
+        });
       }
       msg.appendChild(container);
     }
     if(audioUrl){
-      const ap = document.createElement('div'); ap.className='audio-player'; ap.style.marginTop='6px';
-      const a = document.createElement('audio'); a.controls=true; a.src = audioUrl; a.style.maxWidth='220px'; ap.appendChild(a); msg.appendChild(ap);
+      const ap = document.createElement('div');
+      ap.className = 'audio-player';
+      ap.style.marginTop='6px';
+      const a = document.createElement('audio');
+      a.controls = true;
+      a.src = audioUrl;
+      a.style.maxWidth='220px';
+      ap.appendChild(a);
+      msg.appendChild(ap);
     }
-    const meta = document.createElement('div'); meta.className='meta'; meta.textContent = new Date(ts).toLocaleTimeString();
+    const meta = document.createElement('div');
+    meta.className='meta';
+    meta.textContent = new Date(ts).toLocaleTimeString();
     msg.appendChild(meta);
     chatBox.appendChild(msg);
-    setTimeout(()=> chatBox.scrollTop = chatBox.scrollHeight, 80);
+    setTimeout(()=> chatBox.scrollTop = chatBox.scrollHeight, 70);
+    return msg;
   }
 
-  function renderSessionMessages(messages){
-    // messages expected as array from backend session (ordered)
-    clearMessages();
-    if(!Array.isArray(messages)) return;
-    for(const m of messages){
-      const who = (m.from === 'user') ? 'user' : 'bot';
-      let text = null; let images = null; let audioUrl = null;
-      if(m.type === 'text') text = m.text || null;
-      else if(m.type === 'image'){
-        if(m.url && typeof m.url === 'string') images = [m.url];
-        else if(Array.isArray(m.url)) images = m.url.slice();
-        else if(m.meta && m.meta.prompt) text = m.meta.prompt;
-      } else if(m.type === 'audio'){
-        audioUrl = (m.url && typeof m.url === 'string') ? m.url : null;
-        text = m.transcription || null;
-      } else {
-        text = m.text || m.transcription || null;
-      }
-      renderMessage({ who, text, images, audioUrl, ts: m.ts || Date.now() });
-    }
-  }
-
-  function createTypingController(){
-    const id = 'typing_' + Date.now();
-    const el = document.createElement('div'); el.className = 'message bot'; const b = document.createElement('div'); b.className='bubble bot';
-    const dotsSpan = document.createElement('span'); dotsSpan.className='typing-dots'; dotsSpan.textContent='●'; b.appendChild(dotsSpan); el.appendChild(b);
-    const meta = document.createElement('div'); meta.className='meta'; meta.textContent=''; el.appendChild(meta);
-    chatBox.appendChild(el); chatBox.scrollTop = chatBox.scrollHeight;
-    let state=1; let running=true;
-    const interval = setInterval(()=>{ if(!running) return; state = state>=3?1:state+1; dotsSpan.textContent='●'.repeat(state); },500);
-    return { el, stop: ()=> { running=false; clearInterval(interval); try{ el.remove(); }catch(e){} } };
-  }
+  function clearChat() { chatBox.innerHTML = ''; }
 
   function openModal(src){ modalImg.src = src; modal.style.display = 'flex'; downloadImgBtn.onclick = ()=> { const a = document.createElement('a'); a.href = src; a.download = 'image.png'; document.body.appendChild(a); a.click(); a.remove(); }; }
   function closeModal(){ modal.style.display = 'none'; modalImg.src = ''; }
   closeModalBtn.addEventListener('click', closeModal);
   modal.addEventListener('click', (e)=>{ if(e.target === modal) closeModal(); });
 
-  // ---- TFID helpers (only TFID persisted) ----
+  function updateSendIcon(){ const txt = (userInput.value || '').trim(); if(recording){ sendBtn.classList.add('recording'); sendIcon.innerHTML = '<path d="M6 6h12v12H6z" fill="#fff"/>'; } else if(txt){ sendBtn.classList.remove('recording'); sendIcon.innerHTML = '<path d="M2 21L23 12L2 3L8 12L2 21Z" fill="#fff"/>'; } else { sendBtn.classList.remove('recording'); sendIcon.innerHTML = '<path d="M12 14a3 3 0 0 0 3-3V5a3 3 0 0 0-6 0v6a3 3 0 0 0 3 3zm5-3a5 5 0 0 1-10 0H5a7 7 0 0 0 14 0h-2z"/>'; } }
+  userInput.addEventListener('input', updateSendIcon);
+
+  function extractImageUrlsFromResponse(j){
+    if(!j) return [];
+    const out = [];
+    if(typeof j.imageUrl === 'string' && j.imageUrl.trim()) out.push(j.imageUrl.trim());
+    if(Array.isArray(j.imageUrl)) out.push(...j.imageUrl.map(x=>String(x).trim()));
+    if(Array.isArray(j.imageUrls)) out.push(...j.imageUrls.map(x=>String(x).trim()));
+    if(j.images && Array.isArray(j.images)) out.push(...j.images.map(x=>String(x).trim()));
+    if(j.output && Array.isArray(j.output)){
+      for(const o of j.output){
+        if(o && (o.url || o.image_url || o.imageUrl)) out.push(o.url || o.image_url || o.imageUrl);
+        if(typeof o === 'string' && o.startsWith('data:')) out.push(o);
+      }
+    }
+    return Array.from(new Set(out.filter(Boolean)));
+  }
+
+  function fetchWithTimeout(url, options={}, timeout=420000){
+    const controller = new AbortController();
+    options.signal = controller.signal;
+    const timer = setTimeout(()=> controller.abort(), timeout);
+    return fetch(url, options).then(res => { clearTimeout(timer); return res; }).catch(err => { clearTimeout(timer); throw err; });
+  }
+
+  // Generate a TFID candidate
   async function genTfCandidate(len){
-    let s=''; const chars='0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ';
-    const arr = new Uint32Array(len); crypto.getRandomValues(arr);
-    for(let i=0;i<len;i++) s += chars[arr[i] % chars.length];
+    let s='';
+    const chars='0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ';
+    const arr = new Uint32Array(len);
+    crypto.getRandomValues(arr);
+    for(let i=0;i<len;i++){ s += chars[arr[i] % chars.length]; }
     return 'TF-' + s;
   }
+
   async function registerTfid(candidate){
     try{
       const res = await fetch(API + 'session/create', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ tfid: candidate }) });
@@ -208,182 +227,155 @@
       return false;
     }catch(e){ return false; }
   }
+
   async function getOrCreateTfid(){
-    let tf = localStorage.getItem(TF_KEY);
+    let tf = getStoredTfid();
     if(tf) return tf;
     let len = 7;
     for(let round=0;round<6;round++){
       for(let i=0;i<6;i++){
         const cand = await genTfCandidate(len);
         const ok = await registerTfid(cand);
-        if(ok){ localStorage.setItem(TF_KEY, cand); return cand; }
+        if(ok){ setStoredTfid(cand); return cand; }
       }
       len++;
     }
     const fb = 'TF-' + Date.now();
     await registerTfid(fb);
-    localStorage.setItem(TF_KEY, fb);
+    setStoredTfid(fb);
     return fb;
   }
 
-  // ---- session sync ----
-  async function fetchSessionAndRender(tfid, retries=2){
-    if(!tfid) return;
-    try{
-      const res = await fetchWithTimeout(API + 'session?tfid=' + encodeURIComponent(tfid), {}, 15000);
-      if(!res.ok) return;
-      const j = await res.json().catch(()=>null);
-      if(j && j.ok && j.session && Array.isArray(j.session.messages)){
-        renderSessionMessages(j.session.messages);
+  // Render an array of server session messages (authoritative source)
+  function renderSessionMessages(messages){
+    clearChat();
+    if(!Array.isArray(messages)) return;
+    for (const m of messages) {
+      const who = (m.from === 'user') ? 'user' : 'bot';
+      const ts = m.ts || Date.now();
+      if (m.type === 'text') {
+        if (m.text && m.text.length) renderMessage({ who, text: m.text, ts });
+      } else if (m.type === 'image') {
+        const imgs = [];
+        if (m.url && typeof m.url === 'string') imgs.push(m.url);
+        if (Array.isArray(m.url)) imgs.push(...m.url);
+        renderMessage({ who, text: null, images: imgs.length ? imgs : null, ts });
+      } else if (m.type === 'audio') {
+        const url = (m.url && typeof m.url === 'string') ? m.url : null;
+        renderMessage({ who, text: m.transcription || null, audioUrl: url, ts });
+      } else {
+        // fallback representation
+        const txt = m.text || m.transcription || JSON.stringify(m).slice(0,2000);
+        renderMessage({ who, text: txt, ts });
       }
-    }catch(e){
-      if(retries>0) setTimeout(()=> fetchSessionAndRender(tfid, retries-1), 800);
     }
   }
 
-  // ---- chat send / receive ----
+  // fetch authoritative session from server
+  async function fetchSessionAndRender(tfid) {
+    if(!tfid) return;
+    try {
+      const res = await fetchWithTimeout(API + 'session?tfid=' + encodeURIComponent(tfid), {}, 15000);
+      const j = await res.json().catch(()=>null);
+      if (j && j.ok && j.session && Array.isArray(j.session.messages)) {
+        renderSessionMessages(j.session.messages);
+        return j.session;
+      }
+    } catch(e){}
+    return null;
+  }
+
+  // main chat call: after posting, always try to resync session from server
   async function callChat(text){
     if(!TFID) TFID = await getOrCreateTfid();
-    if(!text || !text.trim()) return;
-    if(text.length > MAX_TEXT){ renderMessage({who:'bot', text:'Tèks twò long. Limit ' + MAX_TEXT + ' karaktè.'}); return; }
-
-    // optimistic: show user bubble immediately (but not saved locally)
+    if(!text || text.length === 0) return;
+    if(text.length > MAX_TEXT){
+      renderMessage({who:'bot', text:'Tèks twò long. Limit ' + MAX_TEXT + ' karaktè.'});
+      return;
+    }
+    // show user bubble optimistically
     renderMessage({ who:'user', text, ts: Date.now() });
 
     const typing = createTypingController();
-    try{
+    try {
       const res = await fetchWithTimeout(API, { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ action:'chat', text, tfid: TFID }) }, 420000);
       let j = null;
-      try{ j = await res.clone().json(); }catch(e){ j = null; }
-      // If backend returned updated session, render it (server is source of truth)
-      if(j && j.ok && j.session && Array.isArray(j.session.messages)){
+      try { j = await res.clone().json(); } catch(e){ j = null; }
+
+      // If server returned session -> render it (authoritative)
+      if (j && j.session && Array.isArray(j.session.messages)) {
         typing.stop();
         renderSessionMessages(j.session.messages);
         return;
       }
-      // fallback: if resp text present
-      if(j && j.ok && (j.text || j.post_text || j.imageUrl)){
+
+      // If server returned text/image only, render then fetch session
+      if (j && (j.text || j.post_text || j.imageUrl)) {
         typing.stop();
-        if(j.imageUrl){
-          // If imageUrl returned plus optional text, we re-fetch session to get canonical messages
-          await fetchSessionAndRender(TFID);
-          return;
+        if (j.imageUrl) {
+          renderMessage({ who:'bot', text: j.post_text || null, images: Array.isArray(j.imageUrl) ? j.imageUrl : [j.imageUrl], ts: Date.now() });
+        } else {
+          renderMessage({ who:'bot', text: j.text || j.post_text || null, ts: Date.now() });
         }
-        if(j.text || j.post_text){
-          renderMessage({ who:'bot', text: (j.text || j.post_text), ts: Date.now() });
-          // then sync full session
-          await fetchSessionAndRender(TFID);
-          return;
-        }
+        // always resync authoritative session
+        await fetchSessionAndRender(TFID);
+        return;
       }
 
-      // if not JSON, try plain text
-      try{
+      // try reading raw text
+      try {
         const txt = await res.clone().text();
-        if(txt && txt.trim()){
+        if (txt && txt.trim()) {
           typing.stop();
           renderMessage({ who:'bot', text: txt.trim(), ts: Date.now() });
           await fetchSessionAndRender(TFID);
           return;
         }
-      }catch(e){}
+      } catch(e){}
 
-      // nothing useful: show not found message
       typing.stop();
-      renderMessage({ who:'bot', text: '(Pa jwenn repons)', ts: Date.now() });
-      // try to sync session anyway
-      await fetchSessionAndRender(TFID);
-    }catch(err){
-      typing.stop();
-      renderMessage({ who:'bot', text: '(Pa jwenn repons)', ts: Date.now() });
+      renderMessage({ who:'bot', text:'(Pa jwenn repons)', ts: Date.now() });
       // attempt re-sync
-      setTimeout(()=> fetchSessionAndRender(TFID), 1000);
+      await fetchSessionAndRender(TFID);
+    } catch (err) {
+      typing.stop();
+      renderMessage({ who:'bot', text:'(Pa jwenn repons)', ts: Date.now() });
+      setTimeout(()=> fetchSessionAndRender(TFID), 800);
     }
   }
 
-  // ---- audio recording / transcription ----
-  function startRecordTimer(){
-    recordTimer = setInterval(()=>{ const s = Math.floor((Date.now()-recordStart)/1000); progressLabel.textContent = s + 's'; const pct = Math.min(100, (s/maxRecordSec)*100); progressFill.style.width = pct + '%'; if(s>=maxRecordSec) stopRecording(); }, 200);
+  // typing controller (visual)
+  function createTypingController(){
+    const id = 'typing_' + Date.now() + '_' + Math.floor(Math.random()*1000);
+    const el = document.createElement('div'); el.className = 'message bot'; el.dataset.id = id;
+    const b = document.createElement('div'); b.className = 'bubble bot';
+    const dotsSpan = document.createElement('span'); dotsSpan.className = 'typing-dots'; dotsSpan.textContent = '●';
+    b.appendChild(dotsSpan); el.appendChild(b);
+    const meta = document.createElement('div'); meta.className='meta'; meta.textContent = '';
+    el.appendChild(meta); chatBox.appendChild(el); chatBox.scrollTop = chatBox.scrollHeight;
+    let state = 1; let running = true;
+    const interval = setInterval(()=>{ if(!running) return; state = state >= 3 ? 1 : state + 1; dotsSpan.textContent = '●'.repeat(state); }, 500);
+    return { el, stop: () => { running = false; clearInterval(interval); try{ if(el && el.parentNode) el.parentNode.removeChild(el); }catch(e){} } };
   }
-  function stopRecordTimer(){ clearInterval(recordTimer); progressFill.style.width='0%'; progressLabel.textContent='0s'; }
 
-  async function startRecording(){
-    if(userInput.value.trim()) return;
-    if(!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia){ alert('Mikwofòn pa disponib sou navigatè sa a.'); return; }
-    try{
-      const stream = await navigator.mediaDevices.getUserMedia({ audio:true });
-      recordedChunks = [];
-      recorder = new MediaRecorder(stream);
-      recorder.ondataavailable = e => { if(e.data && e.data.size) recordedChunks.push(e.data); };
-      recorder.onstop = async () => {
-        const blob = new Blob(recordedChunks, { type:'audio/webm' });
-        const url = URL.createObjectURL(blob);
-        // show user audio bubble (optimistic)
-        renderMessage({ who:'user', text: null, audioUrl: url, ts: Date.now() });
-        // send to transcription endpoint
-        await sendBlobForTranscription(blob);
-        stream.getTracks().forEach(t=>t.stop());
-      };
-      recorder.start();
-      recording = true; recordStart = Date.now();
-      progressRow.style.display = 'flex'; progressFill.style.width='0%'; progressLabel.textContent='0s'; startRecordTimer(); updateSendIcon();
-    }catch(err){
-      alert('Pa jwenn aksè mikwofòn: ' + (err && err.message ? err.message : err));
-    }
-  }
+  // recording functions (same as before)
+  async function startRecording(){ if(userInput.value.trim()) return; if(!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) { alert('Mikwofòn pa disponib sou navigatè sa a.'); return; } try{ const stream = await navigator.mediaDevices.getUserMedia({audio:true}); recordedChunks = []; recorder = new MediaRecorder(stream); recorder.ondataavailable = e => { if(e.data && e.data.size) recordedChunks.push(e.data); }; recorder.onstop = async () => { const blob = new Blob(recordedChunks, {type:'audio/webm'}); const url = URL.createObjectURL(blob); renderMessage({who:'user', text:null, images:null, audioUrl:url, ts:Date.now()}); await sendBlobForTranscription(blob); stream.getTracks().forEach(t=>t.stop()); }; recorder.start(); recording = true; recordStart = Date.now(); progressRow.style.display = 'flex'; progressFill.style.width = '0%'; progressLabel.textContent = '0s'; startRecordTimer(); updateSendIcon(); }catch(err){ alert('Pa jwenn aksè mikwofòn: ' + (err && err.message ? err.message : err)); } }
   function stopRecording(){ if(recorder && recorder.state !== 'inactive') recorder.stop(); recording = false; stopRecordTimer(); progressRow.style.display = 'none'; updateSendIcon(); }
+  function startRecordTimer(){ recordTimer = setInterval(()=>{ const s = Math.floor((Date.now() - recordStart)/1000); progressLabel.textContent = s + 's'; const pct = Math.min(100, (s / maxRecordSec) * 100); progressFill.style.width = pct + '%'; if(s >= maxRecordSec) stopRecording(); }, 200); }
+  function stopRecordTimer(){ clearInterval(recordTimer); progressFill.style.width = '0%'; progressLabel.textContent = '0s'; }
 
-  async function sendBlobForTranscription(blob){
-    if(!TFID) TFID = await getOrCreateTfid();
-    try{
-      const fd = new FormData(); fd.append('file', blob, 'voice.webm'); fd.append('action','transcribe'); fd.append('tfid', TFID);
-      const res = await fetchWithTimeout(API, { method:'POST', body: fd }, 420000);
-      let j = null;
-      try{ j = await res.clone().json(); }catch(e){ j = null; }
-      if(!j){
-        try{ const txt = await res.clone().text(); if(txt && txt.trim()) j = { text: txt.trim() }; }catch(e){}
-      }
-      const text = (j && (j.text || (j.aiRaw && j.aiRaw.text))) ? (j.text || j.aiRaw.text) : null;
-      if(text){
-        // show user text and call chat (will re-sync session after)
-        renderMessage({ who:'user', text, ts: Date.now() });
-        await callChat(text);
-      } else {
-        renderMessage({ who:'bot', text: 'Transcription pa jwenn tèks.', ts: Date.now() });
-        await fetchSessionAndRender(TFID);
-      }
-    }catch(e){
-      renderMessage({ who:'bot', text: 'Erè pandan transcription: ' + (e && e.message ? e.message : e), ts: Date.now() });
-      setTimeout(()=> fetchSessionAndRender(TFID), 1000);
-    }
-  }
+  async function sendBlobForTranscription(blob){ if(!TFID) TFID = await getOrCreateTfid(); try{ const fd = new FormData(); fd.append('file', blob, 'voice.webm'); fd.append('action', 'transcribe'); fd.append('tfid', TFID); const res = await fetchWithTimeout(API, {method:'POST', body: fd}, 420000); let j = null; try{ j = await res.clone().json(); }catch(e){ j = null; } if(!j){ try{ const txt = await res.clone().text(); if(txt && txt.trim()) j = { text: txt.trim() }; }catch(e){} } const text = (j && j.text) ? j.text : (j && j.aiRaw && j.aiRaw.text) ? j.aiRaw.text : null; if(text){ renderMessage({who:'user', text, images:null, audioUrl:null, ts:Date.now()}); await callChat(text); } else { renderMessage({who:'bot', text:'Transcription pa jwenn tèks.', images:null, audioUrl:null, ts:Date.now()}); } }catch(e){ if(e && e.name === 'AbortError'){ renderMessage({who:'bot', text:'(Pa jwenn repons)', images:null, audioUrl:null, ts:Date.now()}); } else { renderMessage({who:'bot', text:'Erè pandan transcription: ' + (e && e.message ? e.message : e), images:null, audioUrl:null, ts:Date.now()}); } } }
 
-  // ---- UI events ----
-  function updateSendIcon(){
-    const txt = (userInput.value || '').trim();
-    if(recording){ sendBtn.classList.add('recording'); sendIcon.innerHTML = '<path d="M6 6h12v12H6z" fill="#fff"/>'; }
-    else if(txt){ sendBtn.classList.remove('recording'); sendIcon.innerHTML = '<path d="M2 21L23 12L2 3L8 12L2 21Z" fill="#fff"/>'; }
-    else { sendBtn.classList.remove('recording'); sendIcon.innerHTML = '<path d="M12 14a3 3 0 0 0 3-3V5a3 3 0 0 0-6 0v6a3 3 0 0 0 3 3zm5-3a5 5 0 0 1-10 0H5a7 7 0 0 0 14 0h-2z"/>'; }
-  }
-  userInput.addEventListener('input', updateSendIcon);
-
-  sendBtn.addEventListener('click', async ()=>{
-    const text = (userInput.value || '').trim();
-    if(recording){ stopRecording(); return; }
-    if(text){ userInput.value=''; updateSendIcon(); await callChat(text); } else { await startRecording(); }
-  });
-
+  sendBtn.addEventListener('click', async ()=>{ const text = (userInput.value || '').trim(); if(recording){ stopRecording(); return; } if(text){ userInput.value = ''; updateSendIcon(); await callChat(text); } else { await startRecording(); } });
   userInput.addEventListener('keydown', (e)=>{ if(e.key === 'Enter' && !e.shiftKey && (e.ctrlKey || e.metaKey)){ e.preventDefault(); sendBtn.click(); } });
 
-  // ---- startup: ensure TFID only, then sync session from server ----
+  // initial bootstrap: ensure TFID and fetch session
   (async ()=>{
     TFID = await getOrCreateTfid();
-    // fetch server-side session and render (server is source of truth)
     await fetchSessionAndRender(TFID);
     updateSendIcon();
   })();
 
-  // visual-viewport handler (keep same behaviour)
   if(window.visualViewport){
     const onView = () => {
       const vv = window.visualViewport;
