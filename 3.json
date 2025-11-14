@@ -3,21 +3,10 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,viewport-fit=cover"/>
-  <title>Adam_D'H7</title>
+  <title>Adam_D'H7 — Assistant multimédia</title>
   <style>
-    :root{
-      --bg:#000;
-      --panel:#000;
-      --ai-bubble:#262626;
-      --ai-text:#d0d0d0;
-      --user-blue:#0b3d91;
-      --user-text:#e8f4ff;
-      --muted:#7d7d7d;
-      --header-h:56px;
-      --form-h:96px;
-      --msg-gap:8px;
-      --max-msg-w:76%;
-    }
+    /* (same CSS as before) */
+    :root{ --bg:#000; --panel:#000; --ai-bubble:#262626; --ai-text:#d0d0d0; --user-blue:#0b3d91; --user-text:#e8f4ff; --muted:#7d7d7d; --header-h:56px; --form-h:96px; --msg-gap:8px; --max-msg-w:76%; }
     html,body{height:100%;margin:0;background:var(--bg);color:var(--ai-text);font-family:Inter,Roboto,Arial,sans-serif;-webkit-text-size-adjust:100%}
     header{height:var(--header-h);position:fixed;left:0;right:0;top:0;display:flex;align-items:center;justify-content:center;z-index:60;background:var(--panel);box-shadow:0 1px 0 rgba(255,255,255,0.02) inset}
     .title{font-weight:800;color:var(--muted);font-size:18px}
@@ -119,6 +108,7 @@
   function softBreak(s, n=40){ if(!s) return ''; return s.replace(new RegExp(`([^\\s]{${n}})`, 'g'), '$1<wbr>'); }
   function escapeHtml(s){ if(!s) return ''; return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
 
+  // --- storage helpers (unchanged)
   function loadStoredMessages(){ try{ const raw = localStorage.getItem(STORAGE_KEY); if(!raw) return []; const arr = JSON.parse(raw); if(!Array.isArray(arr)) return []; return arr; }catch(e){ return []; } }
   function saveStoredMessages(arr){ try{ localStorage.setItem(STORAGE_KEY, JSON.stringify(arr)); }catch(e){ } }
   function pushStoredMessage(msg){ const arr = loadStoredMessages(); arr.push(msg); saveStoredMessages(arr); }
@@ -133,7 +123,6 @@
   modal.addEventListener('click', (e)=>{ if(e.target === modal) closeModal(); });
 
   function updateSendIcon(){ const txt = (userInput.value || '').trim(); if(recording){ sendBtn.classList.add('recording'); sendIcon.innerHTML = '<path d="M6 6h12v12H6z" fill="#fff"/>'; } else if(txt){ sendBtn.classList.remove('recording'); sendIcon.innerHTML = '<path d="M2 21L23 12L2 3L8 12L2 21Z" fill="#fff"/>'; } else { sendBtn.classList.remove('recording'); sendIcon.innerHTML = '<path d="M12 14a3 3 0 0 0 3-3V5a3 3 0 0 0-6 0v6a3 3 0 0 0 3 3zm5-3a5 5 0 0 1-10 0H5a7 7 0 0 0 14 0h-2z"/>'; } }
-
   userInput.addEventListener('input', updateSendIcon);
 
   function extractImageUrlsFromResponse(j){ if(!j) return []; const out = []; if(typeof j.imageUrl === 'string' && j.imageUrl.trim()) out.push(j.imageUrl.trim()); if(Array.isArray(j.imageUrl)) out.push(...j.imageUrl.map(x=>String(x).trim())); if(Array.isArray(j.imageUrls)) out.push(...j.imageUrls.map(x=>String(x).trim())); if(j.images && Array.isArray(j.images)) out.push(...j.images.map(x=>String(x).trim())); if(j.output && Array.isArray(j.output)){ for(const o of j.output){ if(o && (o.url || o.image_url || o.imageUrl)) out.push(o.url || o.image_url || o.imageUrl); if(typeof o === 'string' && o.startsWith('data:')) out.push(o); } } return Array.from(new Set(out.filter(Boolean))); }
@@ -146,7 +135,51 @@
 
   async function getOrCreateTfid(){ let tf = localStorage.getItem(TF_KEY); if(tf) return tf; let len = 7; for(let round=0;round<6;round++){ for(let i=0;i<6;i++){ const cand = await genTfCandidate(len); const ok = await registerTfid(cand); if(ok){ localStorage.setItem(TF_KEY, cand); return cand; } } len++; } const fb = 'TF-' + Date.now(); await registerTfid(fb); localStorage.setItem(TF_KEY, fb); return fb; }
 
-  async function callChat(text){ if(!TFID) TFID = await getOrCreateTfid(); if(!text || text.length === 0) return; if(text.length > MAX_TEXT){ renderMessage({who:'bot', text:'Tèks twò long. Limit ' + MAX_TEXT + ' karaktè.', persist:true}); return; } const userMsgId = 'u_'+Date.now()+'_'+Math.floor(Math.random()*1000); renderMessage({id:userMsgId, who:'user', text, images:null, audioUrl:null, ts:Date.now(), persist:true}); const typing = createTypingController(); const minErrorDelay = 10000; const startTime = Date.now(); let delayedErrorTimer = null; let hadResponse = false; const maxRetries = 1; let attempt = 0; let finalResult = null; let finalError = null; while(attempt <= maxRetries){ attempt++; try{ const res = await fetchWithTimeout(API, { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ action:'chat', text, tfid: TFID }) }, 420000); let j = null; try{ j = await res.clone().json(); }catch(e){ j = null; } if(j && typeof j === 'object'){ finalResult = j; break; } try{ const txt = await res.clone().text(); if(txt && txt.trim()){ finalResult = { text: txt.trim() }; break; } }catch(e){} if(attempt <= maxRetries){ await new Promise(r=>setTimeout(r,3000)); continue; } else { finalResult = null; break; } }catch(e){ finalError = e; if(e && e.name === 'AbortError'){ finalResult = null; break; } if(attempt <= maxRetries){ await new Promise(r=>setTimeout(r,3000)); continue; } else { finalResult = null; break; } } } if(!finalResult && (!finalError || finalError.name !== 'AbortError')){ const elapsed = Date.now() - startTime; if(elapsed < minErrorDelay){ delayedErrorTimer = setTimeout(()=>{ renderMessage({who:'bot', text:'(Pa jwenn repons)', images:null, audioUrl:null, ts:Date.now(), persist:true}); }, minErrorDelay - elapsed); } else { renderMessage({who:'bot', text:'(Pa jwenn repons)', images:null, audioUrl:null, ts:Date.now(), persist:true}); } } if(finalResult){ hadResponse = true; if(delayedErrorTimer){ clearTimeout(delayedErrorTimer); delayedErrorTimer = null; } typing.stop(); const j = finalResult; const imgUrls = extractImageUrlsFromResponse(j); const assistantText = (j && j.text) ? j.text : (j && j.post_text) ? j.post_text : (j && j.response) ? j.response : null; if(imgUrls.length){ renderMessage({who:'bot', text: assistantText || null, images: imgUrls, audioUrl:null, ts:Date.now(), persist:true}); return; } let assistant = assistantText; if(!assistant){ if(j && j.raw && j.raw.response) assistant = j.raw.response; else if(j && j.raw) assistant = typeof j.raw === 'string' ? j.raw : JSON.stringify(j.raw).slice(0,2000); } if(!assistant) assistant = '(Pa jwenn repons)'; renderMessage({who:'bot', text: assistant, images:null, audioUrl:null, ts:Date.now(), persist:true}); return; } if(finalError && finalError.name === 'AbortError'){ if(delayedErrorTimer){ clearTimeout(delayedErrorTimer); delayedErrorTimer = null; } typing.stop(); renderMessage({who:'bot', text:'(Pa jwenn repons)', images:null, audioUrl:null, ts:Date.now(), persist:true}); return; } typing.stop(); }
+  // --- NEW: fetch server session messages and store ONLY those in localStorage
+  async function loadServerSessionAndStore(tfid){
+    try{
+      const res = await fetch(API + 'session?tfid=' + encodeURIComponent(tfid));
+      const j = await res.json().catch(()=>null);
+      if(!j || !j.ok || !j.session || !Array.isArray(j.session.messages)) return [];
+      const serverMsgs = j.session.messages.map((m, idx) => {
+        // Map backend session message -> frontend stored message shape
+        const who = (m.from === 'user') ? 'user' : 'bot';
+        const ts = m.ts || Date.now();
+        let text = null;
+        let images = null;
+        let audioUrl = null;
+        if(m.type === 'text'){
+          text = m.text || null;
+        } else if(m.type === 'image'){
+          // message.url or m.url might be single string or array
+          if(m.url && typeof m.url === 'string') images = [m.url];
+          else if(Array.isArray(m.url)) images = m.url.slice();
+          else if(m.meta && m.meta.prompt) text = m.meta.prompt; // fallback
+        } else if(m.type === 'audio'){
+          audioUrl = (m.url && typeof m.url === 'string') ? m.url : null;
+          text = m.transcription || null;
+        } else {
+          // unknown type: try to extract text or keep raw
+          text = m.text || m.transcription || null;
+        }
+        return {
+          id: 's_'+(m.ts || Date.now())+'_'+idx,
+          who,
+          text,
+          images,
+          audioUrl,
+          ts
+        };
+      });
+      // Replace localStorage with only server messages
+      saveStoredMessages(serverMsgs);
+      return serverMsgs;
+    }catch(e){
+      return [];
+    }
+  }
+
+  async function callChat(text){ if(!TFID) TFID = await getOrCreateTfid(); if(!text || text.length === 0) return; if(text.length > MAX_TEXT){ renderMessage({who:'bot', text:'Tèks twò long. Limit ' + MAX_TEXT + ' karaktè.', persist:true}); return; } const userMsgId = 'u_'+Date.now()+'_'+Math.floor(Math.random()*1000); renderMessage({id:userMsgId, who:'user', text, images:null, audioUrl:null, ts:Date.now(), persist:true}); const typing = createTypingController(); const minErrorDelay = 10000; const startTime = Date.now(); let delayedErrorTimer = null; let hadResponse = false; const maxRetries = 3; let attempt = 0; let finalResult = null; let finalError = null; while(attempt <= maxRetries){ attempt++; try{ const res = await fetchWithTimeout(API, { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ action:'chat', text, tfid: TFID }) }, 420000); let j = null; try{ j = await res.clone().json(); }catch(e){ j = null; } if(j && typeof j === 'object'){ finalResult = j; break; } try{ const txt = await res.clone().text(); if(txt && txt.trim()){ finalResult = { text: txt.trim() }; break; } }catch(e){} if(attempt <= maxRetries){ await new Promise(r=>setTimeout(r,1500)); continue; } else { finalResult = null; break; } }catch(e){ finalError = e; if(e && e.name === 'AbortError'){ finalResult = null; break; } if(attempt <= maxRetries){ await new Promise(r=>setTimeout(r,1500)); continue; } else { finalResult = null; break; } } } if(!finalResult && (!finalError || finalError.name !== 'AbortError')){ const elapsed = Date.now() - startTime; if(elapsed < minErrorDelay){ delayedErrorTimer = setTimeout(()=>{ renderMessage({who:'bot', text:'(Pa jwenn repons)', images:null, audioUrl:null, ts:Date.now(), persist:true}); }, minErrorDelay - elapsed); } else { renderMessage({who:'bot', text:'(Pa jwenn repons)', images:null, audioUrl:null, ts:Date.now(), persist:true}); } } if(finalResult){ hadResponse = true; if(delayedErrorTimer){ clearTimeout(delayedErrorTimer); delayedErrorTimer = null; } typing.stop(); const j = finalResult; const imgUrls = extractImageUrlsFromResponse(j); const assistantText = (j && j.text) ? j.text : (j && j.post_text) ? j.post_text : (j && j.response) ? j.response : null; if(imgUrls.length){ renderMessage({who:'bot', text: assistantText || null, images: imgUrls, audioUrl:null, ts:Date.now(), persist:true}); return; } let assistant = assistantText; if(!assistant){ if(j && j.raw && j.raw.response) assistant = j.raw.response; else if(j && j.raw) assistant = typeof j.raw === 'string' ? j.raw : JSON.stringify(j.raw).slice(0,2000); } if(!assistant) assistant = '(Pa jwenn repons)'; renderMessage({who:'bot', text: assistant, images:null, audioUrl:null, ts:Date.now(), persist:true}); return; } if(finalError && finalError.name === 'AbortError'){ if(delayedErrorTimer){ clearTimeout(delayedErrorTimer); delayedErrorTimer = null; } typing.stop(); renderMessage({who:'bot', text:'(Pa jwenn repons)', images:null, audioUrl:null, ts:Date.now(), persist:true}); return; } typing.stop(); }
 
   async function startRecording(){ if(userInput.value.trim()) return; if(!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) { alert('Mikwofòn pa disponib sou navigatè sa a.'); return; } try{ const stream = await navigator.mediaDevices.getUserMedia({audio:true}); recordedChunks = []; recorder = new MediaRecorder(stream); recorder.ondataavailable = e => { if(e.data && e.data.size) recordedChunks.push(e.data); }; recorder.onstop = async () => { const blob = new Blob(recordedChunks, {type:'audio/webm'}); const url = URL.createObjectURL(blob); renderMessage({who:'user', text:null, images:null, audioUrl:url, ts:Date.now(), persist:true}); await sendBlobForTranscription(blob); stream.getTracks().forEach(t=>t.stop()); }; recorder.start(); recording = true; recordStart = Date.now(); progressRow.style.display = 'flex'; progressFill.style.width = '0%'; progressLabel.textContent = '0s'; startRecordTimer(); updateSendIcon(); }catch(err){ alert('Pa jwenn aksè mikwofòn: ' + (err && err.message ? err.message : err)); } }
 
@@ -162,7 +195,12 @@
 
   function renderStoredConversation(){ const arr = loadStoredMessages(); chatBox.innerHTML = ''; arr.forEach(m => { renderMessage({id:m.id, who:m.who, text:m.text || null, images:m.images || null, audioUrl:m.audioUrl || null, ts:m.ts || Date.now(), persist:false}); }); setTimeout(()=> chatBox.scrollTop = chatBox.scrollHeight, 80); }
 
-  (async ()=>{ TFID = await getOrCreateTfid(); renderStoredConversation(); updateSendIcon(); })();
+  (async ()=>{ TFID = await getOrCreateTfid(); // fetch server session and replace local storage with server messages
+    const serverMsgs = await loadServerSessionAndStore(TFID);
+    // render whatever is in storage (now replaced by server msgs)
+    renderStoredConversation();
+    updateSendIcon();
+  })();
 
   if(window.visualViewport){
     const onView = () => {
