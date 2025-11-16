@@ -1,3 +1,70 @@
+<!doctype html>
+<html lang="ht">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,viewport-fit=cover"/>
+  <title>Adam_D'H7</title>
+  <link rel="manifest" href="/manifest.json">
+  <meta name="theme-color" content="#000000" />
+  <link rel="apple-touch-icon" href="https://adamdh7ai.pages.dev/asset/1024.png">
+  <style>
+    :root{
+      --bg:#000; --panel:#000; --ai-bubble:#262626; --ai-text:#d0d0d0;
+      --user-blue:#0b3d91; --user-text:#e8f4ff; --muted:#7d7d7d;
+      --header-h:56px; --form-h:96px; --msg-gap:8px; --max-msg-w:76%;
+      --wa-code-bg: rgba(255,255,255,0.03); --wa-inline-bg: rgba(255,255,255,0.06);
+      --wa-quote-bar: rgba(255,255,255,0.12);
+    }
+    html,body{height:100%;margin:0;background:var(--bg);color:var(--ai-text);
+      font-family:Inter,Roboto,Arial,sans-serif;-webkit-text-size-adjust:100%}
+    header{height:var(--header-h);position:fixed;left:0;right:0;top:0;display:flex;
+      align-items:center;justify-content:center;z-index:60;background:var(--panel);
+      box-shadow:0 1px 0 rgba(255,255,255,0.02) inset}
+    .title{font-weight:800;color:var(--muted);font-size:18px}
+    .chat-box{position:fixed;top:var(--header-h);bottom:calc(var(--form-h));left:0;right:0;
+      padding:12px;overflow:auto;-webkit-overflow-scrolling:touch;box-sizing:border-box;
+      display:flex;flex-direction:column;gap:var(--msg-gap)}
+    .chat-box::-webkit-scrollbar{display:none}
+    .message{max-width:var(--max-msg-w);word-break:break-word;white-space:pre-wrap;padding:0;display:block}
+    .message.user{align-self:flex-end}
+    .message.bot{align-self:flex-start}
+    .bubble{padding:10px 14px;border-radius:14px;display:inline-block;font-size:15px;line-height:1.35;white-space:pre-wrap}
+    .bubble.user{background:var(--user-blue);color:var(--user-text)}
+    .bubble.bot{background:var(--ai-bubble);color:var(--ai-text);border:1px solid rgba(255,255,255,0.03)}
+    .meta{font-size:11px;color:var(--muted);margin-top:6px;text-align:right}
+    .message-images { display:flex; gap:8px; margin-top:6px; flex-wrap:wrap; align-items:flex-start; }
+    .message-images .img-small { width:96px; height:96px; border-radius:10px; object-fit:cover; cursor:pointer; border:1px solid rgba(255,255,255,0.04); }
+    .message-images .img-large { width:100%; max-width:920px; height:auto; border-radius:12px; object-fit:contain; cursor:pointer; box-shadow:0 8px 30px rgba(0,0,0,0.6); border:1px solid rgba(255,255,255,0.03); }
+    @media (max-width:920px){ .message-images .img-large { max-width:90vw; } .message{max-width:90%;} }
+    @media (max-width:520px){ :root{--max-msg-w:86%} .title{font-size:16px} .message-images .img-small{width:72px;height:72px} }
+    .bottom-zone{position:fixed;left:0;right:0;bottom:0;padding:10px 12px;box-sizing:border-box;
+      background:linear-gradient(180deg,transparent,rgba(0,0,0,0.02));display:flex;flex-direction:column;gap:8px;z-index:50}
+    .progress-row{display:flex;align-items:center;gap:8px;height:18px}
+    .progress-bar{flex:1;height:6px;background:rgba(255,255,255,0.06);border-radius:6px;overflow:hidden}
+    .progress-fill{height:100%;width:0%;background:linear-gradient(90deg,#ff6b6b,#ff3b3b);transition:width 120ms linear}
+    .progress-label{font-size:12px;color:var(--muted);min-width:44px;text-align:left}
+    form{display:flex;align-items:center;gap:10px;padding:8px 0}
+    .input-wrap{flex:1;display:flex;flex-direction:column;gap:6px}
+    textarea{flex:1;min-height:56px;max-height:160px;padding:12px;border-radius:14px;background:#050505;border:1px solid rgba(255,255,255,0.04);color:var(--ai-text);resize:none;outline:none;font-size:15px;box-sizing:border-box}
+    textarea::placeholder{color:rgba(255,255,255,0.16)}
+    .send{width:56px;height:56px;border-radius:50%;border:none;display:flex;align-items:center;justify-content:center;background:linear-gradient(180deg,var(--user-blue),#06306a);cursor:pointer;box-shadow:0 8px 20px rgba(11,61,145,0.12)}
+    .send svg{width:22px;height:22px;fill:#fff}
+    .send.recording{background:linear-gradient(180deg,#9b1b1b,#7a1515)}
+    .softbreak{word-break:break-word;white-space:pre-wrap}
+    .typing-dots { font-weight:800; letter-spacing:3px; display:inline-block; min-width:48px; text-align:left; }
+    .wa-paragraph{margin:6px 0;}
+    .wa-strong{font-weight:700; display:inline; cursor:pointer;}
+    .wa-inline{background:var(--wa-inline-bg); padding:2px 8px; border-radius:6px; font-family:ui-monospace,Menlo,Monaco,monospace; font-size:14px; border:1px solid rgba(255,255,255,0.02); display:inline-block; cursor:pointer;}
+    .wa-code-block{display:block; background:var(--wa-code-bg); padding:10px; border-radius:10px; font-family:ui-monospace,Menlo,Monaco,monospace; font-size:13px; line-height:1.4; color:var(--ai-text); margin:8px 0; border:1px solid rgba(255,255,255,0.03); white-space:pre-wrap; word-break:break-word; cursor:pointer;}
+    .wa-bullet { margin-right:8px; color:var(--muted); font-weight:600; display:inline-block; width:18px; text-align:center; }
+    .wa-underline{ text-decoration: underline; cursor: pointer; display:inline; }
+    .copied-flash{position:relative; display:inline-block;}
+    .copied-flash::after{ content:'✔'; position:absolute; right:-18px; top:0; font-size:12px; opacity:0; transform:translateY(-4px); transition:transform .18s ease, opacity .18s ease; color:#7CFC00; }
+    .copied-flash.copied::after{ opacity:1; transform:translateY(0); }
+  </style>
+</head>
+<body>
+  <header><div class="title">Adam_D'H7</div></header>
   <main id="chatBox" class="chat-box" aria-live="polite"></main>
 
   <div class="bottom-zone" aria-hidden="false">
@@ -316,6 +383,16 @@
     return fetch(url, options).then(res => { clearTimeout(timer); return res; }).catch(err => { clearTimeout(timer); throw err; });
   }
 
+  async function postToAPI(payload, timeout = 420000){
+    if (!TFID) TFID = await getOrCreateTfid();
+    const bodyObj = Object.assign({}, payload, { tfid: TFID });
+    return fetchWithTimeout(API, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(bodyObj)
+    }, timeout);
+  }
+
   async function genTfCandidate(len){
     let s=''; const chars='0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ'; const arr = new Uint32Array(len);
     crypto.getRandomValues(arr); for(let i=0;i<len;i++){ s += chars[arr[i] % chars.length]; } return 'TF-' + s;
@@ -384,13 +461,13 @@
   }
 
   async function callChat(text){
-    if(!TFID) TFID = await getOrCreateTfid();
+    if (!TFID) TFID = await getOrCreateTfid();
     if(!text || text.length === 0) return;
     if(text.length > MAX_TEXT){ renderMessage({who:'bot', text:'Tèks twò long. Limit ' + MAX_TEXT + ' karaktè.'}); return; }
     renderMessage({ who:'user', text, ts: Date.now() });
     const typing = createTypingController();
     try {
-      const res = await fetchWithTimeout(API, { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ action:'chat', text, tfid: TFID }) }, 420000);
+      const res = await postToAPI({ action:'chat', text }, 420000);
       let j = null;
       try { j = await res.clone().json(); } catch(e){ j = null; }
       if (j && j.session && Array.isArray(j.session.messages)) {
@@ -427,6 +504,8 @@
     }
   }
 
+  async function sendBlobForTranscription(blob){ if(!TFID) TFID = await getOrCreateTfid(); try{ const fd = new FormData(); fd.append('file', blob, 'voice.webm'); fd.append('action', 'transcribe'); fd.append('tfid', TFID); const res = await fetchWithTimeout(API, {method:'POST', body: fd}, 420000); let j = null; try{ j = await res.clone().json(); }catch(e){ j = null; } if(!j){ try{ const txt = await res.clone().text(); if(txt && txt.trim()) j = { text: txt.trim() }; }catch(e){} } const text = (j && j.text) ? j.text : (j && j.aiRaw && j.aiRaw.text) ? j.aiRaw.text : null; if(text){ renderMessage({who:'user', text, images:null, audioUrl:null, ts:Date.now()}); await callChat(text); } else { renderMessage({who:'bot', text:'Transcription pa jwenn tèks.', images:null, audioUrl:null, ts:Date.now()}); } }catch(e){ if(e && e.name === 'AbortError'){ renderMessage({who:'bot', text:'(Pa jwenn repons)', images:null, audioUrl:null, ts:Date.now()}); } else { renderMessage({who:'bot', text:'Erè pandan transcription: ' + (e && e.message ? e.message : e), images:null, audioUrl:null, ts:Date.now()}); } } }
+
   function createTypingController(){
     const id = 'typing_' + Date.now() + '_' + Math.floor(Math.random()*1000);
     const el = document.createElement('div'); el.className = 'message bot'; el.dataset.id = id;
@@ -444,8 +523,6 @@
   function stopRecording(){ if(recorder && recorder.state !== 'inactive') recorder.stop(); recording = false; stopRecordTimer(); progressRow.style.display = 'none'; updateSendIcon(); }
   function startRecordTimer(){ recordTimer = setInterval(()=>{ const s = Math.floor((Date.now() - recordStart)/1000); progressLabel.textContent = s + 's'; const pct = Math.min(100, (s / maxRecordSec) * 100); progressFill.style.width = pct + '%'; if(s >= maxRecordSec) stopRecording(); }, 200); }
   function stopRecordTimer(){ clearInterval(recordTimer); progressFill.style.width = '0%'; progressLabel.textContent = '0s'; }
-
-  async function sendBlobForTranscription(blob){ if(!TFID) TFID = await getOrCreateTfid(); try{ const fd = new FormData(); fd.append('file', blob, 'voice.webm'); fd.append('action', 'transcribe'); fd.append('tfid', TFID); const res = await fetchWithTimeout(API, {method:'POST', body: fd}, 420000); let j = null; try{ j = await res.clone().json(); }catch(e){ j = null; } if(!j){ try{ const txt = await res.clone().text(); if(txt && txt.trim()) j = { text: txt.trim() }; }catch(e){} } const text = (j && j.text) ? j.text : (j && j.aiRaw && j.aiRaw.text) ? j.aiRaw.text : null; if(text){ renderMessage({who:'user', text, images:null, audioUrl:null, ts:Date.now()}); await callChat(text); } else { renderMessage({who:'bot', text:'Transcription pa jwenn tèks.', images:null, audioUrl:null, ts:Date.now()}); } }catch(e){ if(e && e.name === 'AbortError'){ renderMessage({who:'bot', text:'(Pa jwenn repons)', images:null, audioUrl:null, ts:Date.now()}); } else { renderMessage({who:'bot', text:'Erè pandan transcription: ' + (e && e.message ? e.message : e), images:null, audioUrl:null, ts:Date.now()}); } } }
 
   sendBtn.addEventListener('click', async ()=>{ const text = (userInput.value || '').trim(); if(recording){ stopRecording(); return; } if(text){ userInput.value = ''; updateSendIcon(); await callChat(text); } else { await startRecording(); } });
   userInput.addEventListener('keydown', (e)=>{ if(e.key === 'Enter' && !e.shiftKey && (e.ctrlKey || e.metaKey)){ e.preventDefault(); sendBtn.click(); } });
