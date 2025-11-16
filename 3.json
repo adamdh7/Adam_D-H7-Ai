@@ -7,6 +7,7 @@
   <link rel="manifest" href="/manifest.json">
   <meta name="theme-color" content="#000000" />
   <link rel="apple-touch-icon" href="https://adamdh7ai.pages.dev/asset/1024.png">
+
   <style>
     :root{
       --bg:#000;
@@ -20,14 +21,17 @@
       --form-h:96px;
       --msg-gap:8px;
       --max-msg-w:76%;
+      --wa-quote-bg: rgba(255,255,255,0.03);
+      --wa-quote-bar: rgba(255,255,255,0.12);
+      --wa-code-bg: rgba(255,255,255,0.03);
+      --wa-inline-bg: rgba(255,255,255,0.06);
     }
     html,body{height:100%;margin:0;background:var(--bg);color:var(--ai-text);
       font-family:Inter,Roboto,Arial,sans-serif;-webkit-text-size-adjust:100%}
     header{height:var(--header-h);position:fixed;left:0;right:0;top:0;display:flex;
       align-items:center;justify-content:center;z-index:60;background:var(--panel);
       box-shadow:0 1px 0 rgba(255,255,255,0.02) inset}
-    .title{font-weight:800;color:var(--muted);font-size:18px;display:flex;align-items:center;gap:10px}
-    .install-btn{background:transparent;border:1px solid rgba(255,255,255,0.06);padding:6px 10px;border-radius:12px;color:var(--ai-text);cursor:pointer;font-size:13px}
+    .title{font-weight:800;color:var(--muted);font-size:18px}
     .chat-box{position:fixed;top:var(--header-h);bottom:calc(var(--form-h));left:0;right:0;
       padding:12px;overflow:auto;-webkit-overflow-scrolling:touch;box-sizing:border-box;
       display:flex;flex-direction:column;gap:var(--msg-gap)}
@@ -50,6 +54,10 @@
     .progress-bar{flex:1;height:6px;background:rgba(255,255,255,0.06);border-radius:6px;overflow:hidden}
     .progress-fill{height:100%;width:0%;background:linear-gradient(90deg,#ff6b6b,#ff3b3b);transition:width 120ms linear}
     .progress-label{font-size:12px;color:var(--muted);min-width:44px;text-align:left}
+    form{display:flex;align-items:center;gap:10px;padding:8px 0}
+    .input-wrap{flex:1;display:flex;flex-direction:column;gap:6px}
+    textarea{flex:1;min-height:56px;max-height:160px;padding:12px;border-radius:14px;background:#050505;border:1px solid rgba(255,255,255,0.04);color:var(--ai-text);resize:none;outline:none;font-size:15px;box-sizing:border-box}
+    textarea::placeholder{color:rgba(255,255,255,0.16)}
     .send{width:56px;height:56px;border-radius:50%;border:none;display:flex;align-items:center;justify-content:center;background:linear-gradient(180deg,var(--user-blue),#06306a);cursor:pointer;box-shadow:0 8px 20px rgba(11,61,145,0.12)}
     .send svg{width:22px;height:22px;fill:#fff}
     .send.recording{background:linear-gradient(180deg,#9b1b1b,#7a1515)}
@@ -59,20 +67,60 @@
     #modal button{background:transparent;border:1px solid rgba(255,255,255,0.06);padding:8px;border-radius:8px;color:var(--ai-text);cursor:pointer}
     #modalImg{max-width:92%;max-height:86%;border-radius:8px;object-fit:contain}
     .typing-dots { font-weight:800; letter-spacing:3px; display:inline-block; min-width:48px; text-align:left; }
-    /* formatting styles */
-    pre.code-block{white-space:pre-wrap;word-break:break-word;padding:12px;border-radius:10px;margin:8px 0;position:relative;border:1px solid rgba(255,255,255,0.04);background:#050505;color:var(--ai-text);font-family:ui-monospace,Menlo,Monaco,monospace}
-    pre.code-block code{display:block;overflow:auto;max-height:360px}
-    .copy-btn{position:absolute;right:8px;top:8px;background:transparent;border:1px solid rgba(255,255,255,0.06);padding:6px;border-radius:8px;color:var(--ai-text);cursor:pointer;font-size:13px}
-    code.inline-code{background:#0b0b0b;padding:2px 6px;border-radius:6px;border:1px solid rgba(255,255,255,0.03);font-family:ui-monospace,Menlo,Monaco,monospace;font-size:13px}
-    blockquote{border-left:3px solid rgba(255,255,255,0.04);margin:0 0 8px 0;padding:8px 12px;color:var(--muted);background:rgba(255,255,255,0.01);border-radius:8px}
+
+    /* ----- WhatsApp-like in-card text styles ----- */
+    .wa-strong{font-weight:700; display:block; margin-bottom:8px;}
+    .wa-quote{
+      display:flex;
+      gap:10px;
+      align-items:flex-start;
+      background:var(--wa-quote-bg);
+      border-radius:8px;
+      padding:8px 10px;
+      margin:8px 0;
+    }
+    .wa-quote .bar{
+      width:4px;
+      border-radius:2px;
+      background:var(--wa-quote-bar);
+      flex:0 0 4px;
+      margin-top:2px;
+    }
+    .wa-quote .content{
+      color:var(--muted);
+      font-size:14px;
+      line-height:1.45;
+      white-space:pre-wrap;
+    }
+    .wa-inline{
+      background:var(--wa-inline-bg);
+      padding:2px 8px;
+      border-radius:6px;
+      font-family: ui-monospace, Menlo, Monaco, monospace;
+      font-size:14px;
+      border:1px solid rgba(255,255,255,0.02);
+      display:inline-block;
+    }
+    .wa-code-block{
+      display:block;
+      background:var(--wa-code-bg);
+      padding:10px;
+      border-radius:10px;
+      font-family: ui-monospace, Menlo, Monaco, monospace;
+      font-size:13px;
+      line-height:1.4;
+      color:var(--ai-text);
+      margin:8px 0;
+      border:1px solid rgba(255,255,255,0.03);
+      white-space:pre-wrap;
+      word-break:break-word;
+    }
+    .wa-paragraph{margin:6px 0;}
   </style>
 </head>
 <body>
   <header>
-    <div class="title">
-      Adam_D'H7
-      <button id="installBtn" class="install-btn" style="display:none">Installer</button>
-    </div>
+    <div class="title">Adam_D'H7</div>
   </header>
 
   <main id="chatBox" class="chat-box" aria-live="polite"></main>
@@ -85,10 +133,12 @@
       </div>
       <div style="width:36px;text-align:right;color:var(--muted);font-size:12px" id="progressLimit">60s</div>
     </div>
+
     <form id="chatForm" autocomplete="off" novalidate style="display:flex;align-items:flex-end;gap:10px">
       <div class="input-wrap" style="flex:1">
         <textarea id="userInput" placeholder="Ekris... oswa peze bouton vwa pou anrejistre" aria-label="Message"></textarea>
       </div>
+
       <button id="sendBtn" class="send" type="button" aria-label="Send">
         <svg id="sendIcon" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3c-.6 0-1 .4-1 1v8h-8c-.6 0-1 .4-1 1 0 .3.1.6.3.8l12 10c.4.3 1 .3 1.4 0l8-6c.4-.3.6-.8.5-1.3s-.4-.8-.9-.9L12 3z" fill="#fff"/></svg>
       </button>
@@ -104,7 +154,6 @@
   </div>
 
 <script>
-/* == main app JS (modified to render markdown-like formatting and code-block copy buttons) == */
 (() => {
   const API = 'https://adamdh7.adamdh7.workers.dev/';
   const TF_KEY = 'tfid_v1';
@@ -120,7 +169,6 @@
   const modalImg = document.getElementById('modalImg');
   const downloadImgBtn = document.getElementById('downloadImgBtn');
   const closeModalBtn = document.getElementById('closeModalBtn');
-  const installBtn = document.getElementById('installBtn');
 
   let TFID = null;
   let recording = false;
@@ -129,7 +177,6 @@
   let recordStart = 0;
   let recordTimer = null;
   let maxRecordSec = 60;
-  let deferredPrompt = null;
 
   function softBreak(s, n=40){ if(!s) return ''; return s.replace(new RegExp(`([^\\s]{${n}})`, 'g'), '$1<wbr>'); }
   function escapeHtml(s){ if(!s) return ''; return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
@@ -137,56 +184,82 @@
   function getStoredTfid(){ try{ return localStorage.getItem(TF_KEY); }catch(e){ return null; } }
   function setStoredTfid(tf){ try{ localStorage.setItem(TF_KEY, tf); }catch(e){} }
 
-  // Format message: supports blockquotes (lines starting with '>'),
-  // code blocks ```...``` with copy buttons, inline code `...`,
-  // bold **...** (accepts multiple asterisks as long as there is at least one at start and one at end),
-  // strikethrough ~~...~~.
+  /*
+    formatMessage: produce HTML that looks like the *text inside a WhatsApp message card*:
+    - lines starting with '>' become quote blocks (.wa-quote)
+    - triple backticks ```...``` => .wa-code-block (monospace block)
+    - inline code `...` => .wa-inline
+    - **bold** or *bold* (any number of asterisks at start/end) => .wa-strong (display:block)
+    - ~~strike~~ => <del>
+    - preserve paragraphs (double-newline -> separate blocks)
+    Important: we don't change the outer bubble UI; only markup inside message bubble.
+  */
   function formatMessage(raw) {
-    if(!raw) return '';
-    // Normalize CRLF to LF
+    if (raw === null || raw === undefined) return '';
+    // normalize newlines
     let s = String(raw).replace(/\r\n/g,'\n').replace(/\r/g,'\n');
 
-    // Escape HTML first
-    s = escapeHtml(s);
-
-    // Code blocks: ```...``` (non-greedy)
-    s = s.replace(/```([\s\S]*?)```/g, (m, codeContent) => {
-      // preserve leading/trailing newlines inside code block
-      const inner = codeContent.replace(/^\n/, '').replace(/\n$/, '');
-      return `<pre class="code-block"><button class="copy-btn" aria-label="Copier">📋</button><code>${inner}</code></pre>`;
+    // Extract code blocks first (```...```)
+    const codeBlocks = [];
+    s = s.replace(/```([\s\S]*?)```/g, (m, inner) => {
+      const idx = codeBlocks.length;
+      codeBlocks.push(inner);
+      return `@@CODEBLOCK_${idx}@@`;
     });
 
-    // Blockquotes: lines that start with '>' possibly with a space
-    // We'll convert consecutive quoted lines into one blockquote
-    s = s.replace(/(^|\n)>([^\n]*)(?:\n>.*)*/g, match => {
-      // collect all consecutive lines starting with >
-      const lines = match.split('\n').map(l => l.replace(/^\s*>\s?/, ''));
+    // Escape the rest
+    function esc(t){ return String(t).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
+    s = esc(s);
+
+    // Handle blockquotes: lines that start with '>' or '&gt;'
+    // We'll collect consecutive quoted lines into one .wa-quote block
+    s = s.replace(/(^|\n)(?:&gt;|>)\s?(.*(?:\n(?:&gt;|>).*)*)/g, (m) => {
+      // rebuild lines
+      const lines = m.split('\n').map(l => l.replace(/^\s*(?:&gt;|>)\s?/, ''));
       // join with <br>
-      const content = lines.join('<br>');
-      return '\n<blockquote>' + content + '</blockquote>\n';
+      return '\n@@QUOTE_START@@' + lines.join('<br>') + '@@QUOTE_END@@\n';
     });
 
-    // Inline code: `...` — accept multiple backticks as long as start and end match (we already handled triple)
-    s = s.replace(/`{1,}([^`]+?)`{1,}/g, (m, c) => `<code class="inline-code">${c}</code>`);
+    // Restore placeholders for codeblocks later; for now handle inline formatting
 
-    // Bold: accept two-or-more asterisks at start and end (collapse extras)
-    s = s.replace(/\*{2,}\s*([\s\S]+?)\s*\*{2,}/g, (m, t) => `<strong>${t}</strong>`);
+    // Convert escaped backticks representation if any (&#96;) back to "`" for inline detection
+    s = s.replace(/&#96;/g, '`');
 
-    // If user had single * pairs (rare), treat same as bold as per user's "as long as start and end exist"
-    s = s.replace(/\*(?!\s)([^*]+?)(?!\s)\*/g, (m, t) => `<strong>${t.slice(1,-1)}</strong>`);
+    // Inline code: single-backtick sections (we already removed triple)
+    s = s.replace(/`([^`]+?)`/g, (m, c) => `<span class="wa-inline">${esc(c)}</span>`);
 
-    // Strikethrough: ~~...~~ accept double or more
-    s = s.replace(/~{2,}\s*([\s\S]+?)\s*~{2,}/g, (m, t) => `<del>${t}</del>`);
+    // Strike: ~~...~~ (accept 2 or more tildes)
+    s = s.replace(/~{2,}\s*([\s\S]+?)\s*~{2,}/g, (m,t) => `<del>${t}</del>`);
 
-    // Convert remaining double newlines to paragraphs and single newlines to <br>
-    // But keep pre blocks intact — we already converted code blocks to <pre> which contains raw <code> with escaped chars.
-    // Replace sequences carefully:
-    // Split by double newline to paragraphs
-    const parts = s.split(/\n{2,}/g).map(p => {
-      // inside each paragraph convert single newlines to <br>
-      return '<div>' + p.replace(/\n/g, '<br>') + '</div>';
+    // Bold: any number of asterisks at start and end (as long as present)
+    // First handle groups of 2+ asterisks
+    s = s.replace(/\*{2,}\s*([\s\S]+?)\s*\*{2,}/g, (m,t)=> `<span class="wa-strong">${t}</span>`);
+    // Then single * pairs (treat as bold too)
+    s = s.replace(/\*(?!\s)([^*]+?)(?!\s)\*/g, (m,t)=> `<span class="wa-strong">${t.slice(1,-1)}</span>`);
+
+    // Now split into paragraphs on double newlines and convert single newlines to <br>
+    const paragraphs = s.split(/\n{2,}/g).map(p => {
+      return p.replace(/\n/g, '<br>');
     });
-    return parts.join('');
+
+    let result = paragraphs.map(p => `<div class="wa-paragraph">${p}</div>`).join('');
+
+    // Replace quote placeholders with actual markup
+    result = result.replace(/@@QUOTE_START@@([\s\S]*?)@@QUOTE_END@@/g, (m, inner) => {
+      return `<div class="wa-quote"><div class="bar"></div><div class="content">${inner}</div></div>`;
+    });
+
+    // Replace codeblock placeholders with .wa-code-block (escape content)
+    result = result.replace(/@@CODEBLOCK_(\d+)@@/g, (m, idx) =>{
+      const i = Number(idx);
+      let content = codeBlocks[i] === undefined ? '' : codeBlocks[i];
+      // remove leading/trailing newlines for neatness
+      content = content.replace(/^\n/, '').replace(/\n$/, '');
+      content = esc(content);
+      return `<pre class="wa-code-block">${content}</pre>`;
+    });
+
+    return result;
   }
 
   function renderMessage({id=null,who='bot', text=null, images=null, audioUrl=null, ts=Date.now(), persist=false}) {
@@ -196,7 +269,6 @@
     if(text){
       const b = document.createElement('div');
       b.className = 'bubble ' + (who === 'user' ? 'user' : 'bot');
-      // Use formatted HTML
       b.innerHTML = softBreak(formatMessage(text), 40);
       msg.appendChild(b);
     }
@@ -251,45 +323,10 @@
   closeModalBtn.addEventListener('click', closeModal);
   modal.addEventListener('click', (e)=>{ if(e.target === modal) closeModal(); });
 
-  // Delegated handler for copy buttons inside pre.code-block
-  document.addEventListener('click', (e) => {
-    const btn = e.target.closest('.copy-btn');
-    if(btn){
-      const pre = btn.closest('pre.code-block');
-      if(!pre) return;
-      const code = pre.querySelector('code');
-      if(!code) return;
-      const txt = code.textContent || '';
-      if(navigator.clipboard && navigator.clipboard.writeText){
-        navigator.clipboard.writeText(txt).then(()=> {
-          // small feedback: temporary text change
-          const old = btn.textContent;
-          btn.textContent = '✔';
-          setTimeout(()=> btn.textContent = old, 900);
-        }).catch(()=> {
-          // fallback
-          const ta = document.createElement('textarea');
-          ta.value = txt;
-          document.body.appendChild(ta);
-          ta.select();
-          try { document.execCommand('copy'); btn.textContent = '✔'; setTimeout(()=> btn.textContent = '📋', 900); } catch(e){ alert('Kopi echwe'); }
-          ta.remove();
-        });
-      } else {
-        // fallback method
-        const ta = document.createElement('textarea');
-        ta.value = txt;
-        document.body.appendChild(ta);
-        ta.select();
-        try { document.execCommand('copy'); btn.textContent = '✔'; setTimeout(()=> btn.textContent = '📋', 900); } catch(e){ alert('Kopi echwe'); }
-        ta.remove();
-      }
-    }
-  });
-
   function updateSendIcon(){ const txt = (userInput.value || '').trim(); if(recording){ sendBtn.classList.add('recording'); sendIcon.innerHTML = '<path d="M6 6h12v12H6z" fill="#fff"/>'; } else if(txt){ sendBtn.classList.remove('recording'); sendIcon.innerHTML = '<path d="M2 21L23 12L2 3L8 12L2 21Z" fill="#fff"/>'; } else { sendBtn.classList.remove('recording'); sendIcon.innerHTML = '<path d="M12 14a3 3 0 0 0 3-3V5a3 3 0 0 0-6 0v6a3 3 0 0 0 3 3zm5-3a5 5 0 0 1-10 0H5a7 7 0 0 0 14 0h-2z"/>'; } }
   userInput.addEventListener('input', updateSendIcon);
 
+  /* --- session / network helpers (unchanged) --- */
   function extractImageUrlsFromResponse(j){
     if(!j) return [];
     const out = [];
@@ -330,6 +367,9 @@
       return false;
     }catch(e){ return false; }
   }
+
+  function getStoredTfid(){ try{ return localStorage.getItem(TF_KEY); }catch(e){ return null; } }
+  function setStoredTfid(tf){ try{ localStorage.setItem(TF_KEY, tf); }catch(e){} }
 
   async function getOrCreateTfid(){
     let tf = getStoredTfid();
@@ -398,7 +438,7 @@
     try {
       const res = await fetchWithTimeout(API, { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ action:'chat', text, tfid: TFID }) }, 420000);
       let j = null;
-      try{ j = await res.clone().json(); } catch(e){ j = null; }
+      try { j = await res.clone().json(); } catch(e){ j = null; }
 
       if (j && j.session && Array.isArray(j.session.messages)) {
         typing.stop();
@@ -485,25 +525,9 @@
 
   window.toggleSidebar = ()=> { };
 
-  // Install prompt handling (PWA)
-  window.addEventListener('beforeinstallprompt', (e) => {
-    e.preventDefault();
-    deferredPrompt = e;
-    installBtn.style.display = 'inline-block';
-  });
-  installBtn.addEventListener('click', async () => {
-    if(!deferredPrompt) return;
-    deferredPrompt.prompt();
-    const choice = await deferredPrompt.userChoice.catch(()=>null);
-    deferredPrompt = null;
-    installBtn.style.display = 'none';
-  });
-
-  // Register service worker (attempt; fail silently)
   if ('serviceWorker' in navigator) {
     navigator.serviceWorker.register('/sw.js', { scope: '/' }).then(reg => {
-      // registration ok
-    }).catch(()=>{ /* ignore registration errors */ });
+    }).catch(()=>{});
   }
 
 })();
