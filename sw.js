@@ -2,8 +2,10 @@
 const CACHE_VERSION = 'v7-adamdh7';
 const PRECACHE_URLS = [
   '/',
+  'index.html',
+  'sw.js',
   '/manifest.json',
-  'https://adamdh7ai.pages.dev/asset/1024.png'
+  'https://adamdh7ai.pages.dev/asset/512.png'
 ];
 
 function sendMessageToClients(msg){
