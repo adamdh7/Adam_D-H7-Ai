@@ -1,10 +1,8 @@
 // sw.js
-const CACHE_VERSION = 'v2-adamdh7';
+const CACHE_VERSION = 'v7-adamdh7';
 const PRECACHE_URLS = [
   '/',
-  '/index.html',
   '/manifest.json',
-  '/sw.js',
   'https://adamdh7ai.pages.dev/asset/1024.png'
 ];
 
