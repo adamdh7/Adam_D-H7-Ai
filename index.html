@@ -1,32 +1,34 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="ht">
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,viewport-fit=cover"/>
-  <title>Adam_D'H7 — Assistant multimédia</title>
+  <title>Adam_D'H7</title>
+  <link rel="manifest" href="/manifest.json">
+  <meta name="theme-color" content="#000000" />
+  <link rel="apple-touch-icon" href="https://adamdh7ai.pages.dev/asset/1024.png">
   <style>
     :root{
-      --bg:#000;
-      --panel:#000;
-      --ai-bubble:#262626;
-      --ai-text:#d0d0d0;
-      --user-blue:#0b3d91;
-      --user-text:#e8f4ff;
-      --muted:#7d7d7d;
-      --header-h:56px;
-      --form-h:96px;
-      --msg-gap:8px;
-      --max-msg-w:76%;
+      --bg:#000; --panel:#000; --ai-bubble:#262626; --ai-text:#d0d0d0;
+      --user-blue:#0b3d91; --user-text:#e8f4ff; --muted:#7d7d7d;
+      --header-h:56px; --form-h:96px; --msg-gap:8px; --max-msg-w:76%;
+      --wa-code-bg: rgba(255,255,255,0.03); --wa-inline-bg: rgba(255,255,255,0.06);
+      --wa-quote-bar: rgba(255,255,255,0.12);
     }
-    html,body{height:100%;margin:0;background:var(--bg);color:var(--ai-text);font-family:Inter,Roboto,Arial,sans-serif;-webkit-text-size-adjust:100%}
-    header{height:var(--header-h);position:fixed;left:0;right:0;top:0;display:flex;align-items:center;justify-content:center;z-index:60;background:var(--panel);box-shadow:0 1px 0 rgba(255,255,255,0.02) inset}
+    html,body{height:100%;margin:0;background:var(--bg);color:var(--ai-text);
+      font-family:Inter,Roboto,Arial,sans-serif;-webkit-text-size-adjust:100%}
+    header{height:var(--header-h);position:fixed;left:0;right:0;top:0;display:flex;
+      align-items:center;justify-content:center;z-index:60;background:var(--panel);
+      box-shadow:0 1px 0 rgba(255,255,255,0.02) inset}
     .title{font-weight:800;color:var(--muted);font-size:18px}
-    .chat-box{position:fixed;top:var(--header-h);bottom:calc(var(--form-h));left:0;right:0;padding:12px;overflow:auto;-webkit-overflow-scrolling:touch;box-sizing:border-box;display:flex;flex-direction:column;gap:var(--msg-gap)}
+    .chat-box{position:fixed;top:var(--header-h);bottom:calc(var(--form-h));left:0;right:0;
+      padding:12px;overflow:auto;-webkit-overflow-scrolling:touch;box-sizing:border-box;
+      display:flex;flex-direction:column;gap:var(--msg-gap)}
     .chat-box::-webkit-scrollbar{display:none}
     .message{max-width:var(--max-msg-w);word-break:break-word;white-space:pre-wrap;padding:0;display:block}
     .message.user{align-self:flex-end}
     .message.bot{align-self:flex-start}
-    .bubble{padding:10px 14px;border-radius:14px;display:inline-block;font-size:15px;line-height:1.35}
+    .bubble{padding:10px 14px;border-radius:14px;display:inline-block;font-size:15px;line-height:1.35;white-space:pre-wrap}
     .bubble.user{background:var(--user-blue);color:var(--user-text)}
     .bubble.bot{background:var(--ai-bubble);color:var(--ai-text);border:1px solid rgba(255,255,255,0.03)}
     .meta{font-size:11px;color:var(--muted);margin-top:6px;text-align:right}
@@ -35,7 +37,8 @@
     .message-images .img-large { width:100%; max-width:920px; height:auto; border-radius:12px; object-fit:contain; cursor:pointer; box-shadow:0 8px 30px rgba(0,0,0,0.6); border:1px solid rgba(255,255,255,0.03); }
     @media (max-width:920px){ .message-images .img-large { max-width:90vw; } .message{max-width:90%;} }
     @media (max-width:520px){ :root{--max-msg-w:86%} .title{font-size:16px} .message-images .img-small{width:72px;height:72px} }
-    .bottom-zone{position:fixed;left:0;right:0;bottom:0;padding:10px 12px;box-sizing:border-box;background:linear-gradient(180deg,transparent,rgba(0,0,0,0.02));display:flex;flex-direction:column;gap:8px;z-index:50}
+    .bottom-zone{position:fixed;left:0;right:0;bottom:0;padding:10px 12px;box-sizing:border-box;
+      background:linear-gradient(180deg,transparent,rgba(0,0,0,0.02));display:flex;flex-direction:column;gap:8px;z-index:50}
     .progress-row{display:flex;align-items:center;gap:8px;height:18px}
     .progress-bar{flex:1;height:6px;background:rgba(255,255,255,0.06);border-radius:6px;overflow:hidden}
     .progress-fill{height:100%;width:0%;background:linear-gradient(90deg,#ff6b6b,#ff3b3b);transition:width 120ms linear}
@@ -48,35 +51,31 @@
     .send svg{width:22px;height:22px;fill:#fff}
     .send.recording{background:linear-gradient(180deg,#9b1b1b,#7a1515)}
     .softbreak{word-break:break-word;white-space:pre-wrap}
-    #modal{position:fixed;left:0;top:0;right:0;bottom:0;background:rgba(0,0,0,0.92);display:none;align-items:center;justify-content:center;z-index:100}
-    #modal .controls{position:absolute;top:14px;right:14px;display:flex;gap:8px}
-    #modal button{background:transparent;border:1px solid rgba(255,255,255,0.06);padding:8px;border-radius:8px;color:var(--ai-text);cursor:pointer}
-    #modalImg{max-width:92%;max-height:86%;border-radius:8px;object-fit:contain}
-    /* typing dots only */
     .typing-dots { font-weight:800; letter-spacing:3px; display:inline-block; min-width:48px; text-align:left; }
+    .wa-paragraph{margin:6px 0;}
+    .wa-strong{font-weight:700; display:inline; cursor:pointer;}
+    .wa-inline{background:var(--wa-inline-bg); padding:2px 8px; border-radius:6px; font-family:ui-monospace,Menlo,Monaco,monospace; font-size:14px; border:1px solid rgba(255,255,255,0.02); display:inline-block; cursor:pointer;}
+    .wa-code-block{display:block; background:var(--wa-code-bg); padding:10px; border-radius:10px; font-family:ui-monospace,Menlo,Monaco,monospace; font-size:13px; line-height:1.4; color:var(--ai-text); margin:8px 0; border:1px solid rgba(255,255,255,0.03); white-space:pre-wrap; word-break:break-word; cursor:pointer;}
+    .wa-bullet { margin-right:8px; color:var(--muted); font-weight:600; display:inline-block; width:18px; text-align:center; }
+    .wa-underline{ text-decoration: underline; cursor: pointer; display:inline; }
+    .copied-flash{position:relative; display:inline-block;}
+    .copied-flash::after{ content:'✔'; position:absolute; right:-18px; top:0; font-size:12px; opacity:0; transform:translateY(-4px); transition:transform .18s ease, opacity .18s ease; color:#7CFC00; }
+    .copied-flash.copied::after{ opacity:1; transform:translateY(0); }
   </style>
 </head>
 <body>
-  <header>
-    <div class="title">Adam_D'H7</div>
-  </header>
-
+  <header><div class="title">Adam_D'H7</div></header>
   <main id="chatBox" class="chat-box" aria-live="polite"></main>
 
   <div class="bottom-zone" aria-hidden="false">
     <div id="progressRow" class="progress-row" style="display:none">
       <div id="progressLabel" class="progress-label">0s</div>
-      <div class="progress-bar" aria-hidden="true">
-        <div id="progressFill" class="progress-fill" style="width:0%"></div>
-      </div>
+      <div class="progress-bar" aria-hidden="true"><div id="progressFill" class="progress-fill" style="width:0%"></div></div>
       <div style="width:36px;text-align:right;color:var(--muted);font-size:12px" id="progressLimit">60s</div>
     </div>
 
     <form id="chatForm" autocomplete="off" novalidate style="display:flex;align-items:flex-end;gap:10px">
-      <div class="input-wrap" style="flex:1">
-        <textarea id="userInput" placeholder="Ekris... oswa peze bouton vwa pou anrejistre" aria-label="Message"></textarea>
-      </div>
-
+      <div class="input-wrap" style="flex:1"><textarea id="userInput" placeholder="Ekris... oswa peze bouton vwa pou anrejistre" aria-label="Message"></textarea></div>
       <button id="sendBtn" class="send" type="button" aria-label="Send">
         <svg id="sendIcon" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3c-.6 0-1 .4-1 1v8h-8c-.6 0-1 .4-1 1 0 .3.1.6.3.8l12 10c.4.3 1 .3 1.4 0l8-6c.4-.3.6-.8.5-1.3s-.4-.8-.9-.9L12 3z" fill="#fff"/></svg>
       </button>
@@ -85,7 +84,7 @@
 
   <div id="modal" style="display:none;align-items:center;justify-content:center;">
     <div class="controls">
-      <button id="downloadImgBtn">Download</button>
+      <button id="downloadImgBtn"></button>
       <button id="closeModalBtn">✖</button>
     </div>
     <img id="modalImg" src="" alt="Preview"/>
@@ -94,7 +93,8 @@
 <script>
 (() => {
   const API = 'https://adamdh7.adamdh7.workers.dev/';
-  const STORAGE_KEY = 'adam_messages_v1';
+  const TF_KEY = 'tfid_v1';
+  const MAX_TEXT = 10000;
   const chatBox = document.getElementById('chatBox');
   const userInput = document.getElementById('userInput');
   const sendBtn = document.getElementById('sendBtn');
@@ -104,58 +104,198 @@
   const progressLabel = document.getElementById('progressLabel');
   const modal = document.getElementById('modal');
   const modalImg = document.getElementById('modalImg');
-  const downloadImgBtn = document.getElementById('downloadImgBtn');
   const closeModalBtn = document.getElementById('closeModalBtn');
 
-  let recording = false;
-  let recorder = null;
-  let recordedChunks = [];
-  let recordStart = 0;
-  let recordTimer = null;
-  let maxRecordSec = 60;
+  let TFID = null, recording=false, recorder=null, recordedChunks=[], recordStart=0, recordTimer=null, maxRecordSec=60;
 
-  function softBreak(s, n=40){ if(!s) return ''; return s.replace(new RegExp(`([^\\s]{${n}})`, 'g'), '$1<wbr>'); }
-  function escapeHtml(s){ if(!s) return ''; return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
+  function escapeAttr(s){ return String(s === null || s === undefined ? '' : s).replace(/&/g,'&amp;').replace(/"/g,'&quot;').replace(/</g,'&lt;'); }
 
-  function loadStoredMessages(){
-    try{
-      const raw = localStorage.getItem(STORAGE_KEY);
-      if(!raw) return [];
-      const arr = JSON.parse(raw);
-      if(!Array.isArray(arr)) return [];
-      return arr;
-    }catch(e){ return []; }
-  }
-  function saveStoredMessages(arr){
-    try{ localStorage.setItem(STORAGE_KEY, JSON.stringify(arr)); }catch(e){ }
-  }
-  function pushStoredMessage(msg){
-    const arr = loadStoredMessages();
-    arr.push(msg);
-    saveStoredMessages(arr);
+  function collectPlain(node){
+    if(!node) return '';
+    if(node.nodeType === Node.TEXT_NODE) return node.nodeValue || '';
+    if(node.nodeType !== Node.ELEMENT_NODE) return '';
+    if(node.hasAttribute && node.hasAttribute('data-plain')) return node.getAttribute('data-plain') || '';
+    let out = '';
+    for(const ch of node.childNodes){
+      out += collectPlain(ch);
+    }
+    return out;
   }
 
-  function renderMessage({id=null,who='bot', text=null, images=null, audioUrl=null, ts=Date.now(), persist=true}){
+  function buildInlineFragment(text){
+    const frag = document.createDocumentFragment();
+    if(!text) return frag;
+    let idx = 0;
+    const codeRe = /`([^`]+?)`/g;
+    let m;
+    while ((m = codeRe.exec(text)) !== null) {
+      if (m.index > idx) appendFormattedText(frag, text.slice(idx, m.index));
+      const codeInner = m[1];
+      const span = document.createElement('span');
+      span.className = 'wa-inline';
+      span.textContent = codeInner;
+      span.setAttribute('data-plain', codeInner);
+      frag.appendChild(span);
+      idx = codeRe.lastIndex;
+    }
+    if (idx < text.length) appendFormattedText(frag, text.slice(idx));
+    return frag;
+  }
+
+  function appendFormattedText(parent, text){
+    if(!text) return;
+    let pos = 0;
+    const strikeRe = /~~([\s\S]*?)~~/g;
+    let mm;
+    while ((mm = strikeRe.exec(text)) !== null) {
+      if (mm.index > pos) handleUnderlineAndBold(parent, text.slice(pos, mm.index));
+      const inner = mm[1];
+      const del = document.createElement('del');
+      del.textContent = inner;
+      del.setAttribute('data-plain', inner);
+      parent.appendChild(del);
+      pos = strikeRe.lastIndex;
+    }
+    if (pos < text.length) handleUnderlineAndBold(parent, text.slice(pos));
+  }
+
+  function handleUnderlineAndBold(parent, text){
+    if(!text) return;
+    let p = 0;
+    const underlineRe = /~([^~]+?)~/g;
+    let m2;
+    while ((m2 = underlineRe.exec(text)) !== null) {
+      if (m2.index > p) appendBoldAndPlain(parent, text.slice(p, m2.index));
+      const inner = m2[1];
+      const span = document.createElement('span');
+      span.className = 'wa-underline';
+      span.textContent = inner;
+      span.setAttribute('data-plain', inner);
+      parent.appendChild(span);
+      p = underlineRe.lastIndex;
+    }
+    if (p < text.length) appendBoldAndPlain(parent, text.slice(p));
+  }
+
+  function appendBoldAndPlain(parent, text){
+    if(!text) return;
+    const boldRe = /(\*{1,})([\s\S]*?)\1/g;
+    let pos = 0;
+    let mm;
+    while ((mm = boldRe.exec(text)) !== null) {
+      if (mm.index > pos) parent.appendChild(document.createTextNode(text.slice(pos, mm.index)));
+      const inner = mm[2];
+      const span = document.createElement('span');
+      span.className = 'wa-strong';
+      span.textContent = inner;
+      span.setAttribute('data-plain', inner);
+      parent.appendChild(span);
+      pos = boldRe.lastIndex;
+    }
+    if (pos < text.length) parent.appendChild(document.createTextNode(text.slice(pos)));
+  }
+
+  function buildParagraphFragment(para){
+    const frag = document.createDocumentFragment();
+    const lines = para.split('\n');
+    lines.forEach((line) => {
+      const bulletMatch = line.match(/^\s*([-*])\s+(.*)$/);
+      if (bulletMatch) {
+        const bulletWrap = document.createElement('div');
+        bulletWrap.className = 'wa-paragraph';
+        const bullet = document.createElement('span');
+        bullet.className = 'wa-bullet';
+        bullet.textContent = '•';
+        bulletWrap.appendChild(bullet);
+        const contentSpan = document.createElement('span');
+        const contentFrag = buildInlineFragment(bulletMatch[2]);
+        contentSpan.appendChild(contentFrag);
+        const plain = collectPlain(contentSpan);
+        contentSpan.setAttribute('data-plain', plain);
+        bulletWrap.setAttribute('data-plain', plain);
+        bulletWrap.appendChild(contentSpan);
+        frag.appendChild(bulletWrap);
+      } else {
+        const nodeContainer = document.createElement('div');
+        nodeContainer.className = 'wa-paragraph';
+        const inlineFrag = buildInlineFragment(line);
+        if(!inlineFrag.firstChild) nodeContainer.textContent = '';
+        nodeContainer.appendChild(inlineFrag);
+        nodeContainer.setAttribute('data-plain', collectPlain(nodeContainer));
+        frag.appendChild(nodeContainer);
+      }
+    });
+    return frag;
+  }
+
+  function formatToFragment(raw){
+    const frag = document.createDocumentFragment();
+    if (raw === null || raw === undefined) return frag;
+    let s = String(raw).replace(/\r\n/g,'\n').replace(/\r/g,'\n');
+    const codeBlocks = [];
+    s = s.replace(/```([\s\S]*?)```/g, (m, inner) => {
+      const idx = codeBlocks.length;
+      codeBlocks.push(inner);
+      return `@@CODEBLOCK_${idx}@@`;
+    });
+    const paragraphs = s.split(/\n{2,}/g);
+    paragraphs.forEach(par => {
+      const codeMatch = par.match(/^@@CODEBLOCK_(\d+)@@$/);
+      if (codeMatch) {
+        const i = Number(codeMatch[1]);
+        const inner = codeBlocks[i] || '';
+        const pre = document.createElement('pre');
+        pre.className = 'wa-code-block';
+        pre.textContent = inner;
+        pre.setAttribute('data-plain', inner);
+        frag.appendChild(pre);
+        return;
+      }
+      let cursor = 0;
+      const tokenRe = /(@@CODEBLOCK_(\d+)@@)/g;
+      let m;
+      const container = document.createDocumentFragment();
+      while ((m = tokenRe.exec(par)) !== null) {
+        if (m.index > cursor) container.appendChild(buildParagraphFragment(par.slice(cursor, m.index)));
+        const inner = codeBlocks[Number(m[2])] || '';
+        const pre = document.createElement('pre');
+        pre.className = 'wa-code-block';
+        pre.textContent = inner;
+        pre.setAttribute('data-plain', inner);
+        container.appendChild(pre);
+        cursor = tokenRe.lastIndex;
+      }
+      if (cursor < par.length) container.appendChild(buildParagraphFragment(par.slice(cursor)));
+      frag.appendChild(container);
+    });
+    return frag;
+  }
+
+  function renderMessage({id=null,who='bot', text=null, images=null, audioUrl=null, ts=Date.now(), persist=false}) {
     const msg = document.createElement('div');
     msg.className = 'message ' + (who === 'user' ? 'user' : 'bot');
     msg.dataset.id = id || ('m_'+Date.now()+'_'+Math.floor(Math.random()*1000));
-    if(text){
+    if (text) {
       const b = document.createElement('div');
       b.className = 'bubble ' + (who === 'user' ? 'user' : 'bot');
-      b.innerHTML = softBreak(escapeHtml(text), 40);
+      if (who === 'bot') {
+        const frag = formatToFragment(text);
+        b.appendChild(frag);
+      } else {
+        b.textContent = text;
+      }
       msg.appendChild(b);
     }
-    if(Array.isArray(images) && images.length){
+    if (Array.isArray(images) && images.length) {
       const container = document.createElement('div');
       container.className = 'message-images';
-      if(images.length === 1){
-        const src = images[0];
+      if (images.length === 1) {
         const im = document.createElement('img');
         im.className = 'img-large';
-        im.src = src;
+        im.src = images[0];
         im.alt = 'generated image';
         im.loading = 'lazy';
-        im.addEventListener('click', ()=> openModal(src));
+        im.addEventListener('click', ()=> openModal(images[0]));
         container.appendChild(im);
       } else {
         images.forEach(src => {
@@ -170,81 +310,54 @@
       }
       msg.appendChild(container);
     }
-    if(audioUrl){
-      const ap = document.createElement('div'); ap.className = 'audio-player'; ap.style.marginTop='6px';
-      const a = document.createElement('audio'); a.controls = true; a.src = audioUrl; a.style.maxWidth='220px';
-      ap.appendChild(a); msg.appendChild(ap);
+    if (audioUrl) {
+      const ap = document.createElement('div');
+      ap.className = 'audio-player';
+      ap.style.marginTop = '6px';
+      const a = document.createElement('audio');
+      a.controls = true;
+      a.src = audioUrl;
+      a.style.maxWidth = '220px';
+      ap.appendChild(a);
+      msg.appendChild(ap);
     }
-    const meta = document.createElement('div'); meta.className='meta'; meta.textContent = new Date(ts).toLocaleTimeString();
+    const meta = document.createElement('div');
+    meta.className = 'meta';
+    meta.textContent = new Date(ts).toLocaleTimeString();
     msg.appendChild(meta);
     chatBox.appendChild(msg);
     setTimeout(()=> chatBox.scrollTop = chatBox.scrollHeight, 70);
-    if(persist){
-      const toSave = {id: msg.dataset.id, who, text, images, audioUrl, ts};
-      try{ pushStoredMessage(toSave); }catch(e){}
-    }
     return msg;
   }
 
-  // typing bubble with only animated dots '●', '●●', '●●●', repeat
-  function createTypingController(){
-    const id = 'typing_' + Date.now() + '_' + Math.floor(Math.random()*1000);
-    const el = document.createElement('div');
-    el.className = 'message bot';
-    el.dataset.id = id;
-    const b = document.createElement('div');
-    b.className = 'bubble bot';
-    const dotsSpan = document.createElement('span');
-    dotsSpan.className = 'typing-dots';
-    dotsSpan.textContent = '●';
-    b.appendChild(dotsSpan);
-    el.appendChild(b);
-    const meta = document.createElement('div'); meta.className='meta'; meta.textContent = '';
-    el.appendChild(meta);
-    chatBox.appendChild(el);
-    chatBox.scrollTop = chatBox.scrollHeight;
-
-    let state = 1;
-    let running = true;
-    const interval = setInterval(()=>{
-      if(!running) return;
-      state = state >= 3 ? 1 : state + 1;
-      dotsSpan.textContent = '●'.repeat(state);
-    }, 500);
-
-    return {
-      el,
-      stop: () => {
-        running = false;
-        clearInterval(interval);
-        try{ if(el && el.parentNode) el.parentNode.removeChild(el); }catch(e){}
-      }
-    };
-  }
-
-  function openModal(src){
-    modalImg.src = src;
-    modal.style.display = 'flex';
-    downloadImgBtn.onclick = ()=> {
-      const a = document.createElement('a');
-      a.href = src;
-      a.download = 'image.png';
-      document.body.appendChild(a);
-      a.click();
-      a.remove();
-    };
-  }
+  function openModal(src){ modalImg.src = src; modal.style.display = 'flex'; }
   function closeModal(){ modal.style.display = 'none'; modalImg.src = ''; }
   closeModalBtn.addEventListener('click', closeModal);
   modal.addEventListener('click', (e)=>{ if(e.target === modal) closeModal(); });
 
-  function updateSendIcon(){
-    const txt = (userInput.value || '').trim();
-    if(recording){ sendBtn.classList.add('recording'); sendIcon.innerHTML = '<path d="M6 6h12v12H6z" fill="#fff"/>'; }
-    else if(txt){ sendBtn.classList.remove('recording'); sendIcon.innerHTML = '<path d="M2 21L23 12L2 3L8 12L2 21Z" fill="#fff"/>'; }
-    else { sendBtn.classList.remove('recording'); sendIcon.innerHTML = '<path d="M12 14a3 3 0 0 0 3-3V5a3 3 0 0 0-6 0v6a3 3 0 0 0 3 3zm5-3a5 5 0 0 1-10 0H5a7 7 0 0 0 14 0h-2z"/>'; }
+  document.addEventListener('click', (e) => {
+    const el = e.target.closest('[data-plain]');
+    if (!el) return;
+    const txt = el.getAttribute('data-plain') || '';
+    if (!txt) return;
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      navigator.clipboard.writeText(txt).then(() => {
+        el.classList.add('copied');
+        setTimeout(()=> el.classList.remove('copied'), 800);
+      }).catch(() => fallbackCopy(txt, el));
+    } else fallbackCopy(txt, el);
+  });
+
+  function fallbackCopy(txt, el){
+    const ta = document.createElement('textarea');
+    ta.value = txt;
+    document.body.appendChild(ta);
+    ta.select();
+    try { document.execCommand('copy'); el.classList.add('copied'); setTimeout(()=> el.classList.remove('copied'),800); } catch(e){ alert('Kopi echwe'); }
+    ta.remove();
   }
 
+  function updateSendIcon(){ const txt = (userInput.value || '').trim(); if(recording){ sendBtn.classList.add('recording'); sendIcon.innerHTML = '<path d="M6 6h12v12H6z" fill="#fff"/>'; } else if(txt){ sendBtn.classList.remove('recording'); sendIcon.innerHTML = '<path d="M2 21L23 12L2 3L8 12L2 21Z" fill="#fff"/>'; } else { sendBtn.classList.remove('recording'); sendIcon.innerHTML = '<path d="M12 14a3 3 0 0 0 3-3V5a3 3 0 0 0-6 0v6a3 3 0 0 0 3 3zm5-3a5 5 0 0 1-10 0H5a7 7 0 0 0 14 0h-2z"/>'; } }
   userInput.addEventListener('input', updateSendIcon);
 
   function extractImageUrlsFromResponse(j){
@@ -270,228 +383,156 @@
     return fetch(url, options).then(res => { clearTimeout(timer); return res; }).catch(err => { clearTimeout(timer); throw err; });
   }
 
-  // callChat with delay-before-error logic (don't show error immediately)
-  async function callChat(text){
-    const userMsgId = 'u_'+Date.now()+'_'+Math.floor(Math.random()*1000);
-    renderMessage({id:userMsgId, who:'user', text, images:null, audioUrl:null, ts:Date.now(), persist:true});
+  async function genTfCandidate(len){
+    let s=''; const chars='0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ'; const arr = new Uint32Array(len);
+    crypto.getRandomValues(arr); for(let i=0;i<len;i++){ s += chars[arr[i] % chars.length]; } return 'TF-' + s;
+  }
 
-    const typing = createTypingController();
-    const minErrorDelay = 10000; // 10s: wait at least this before showing "(Pa jwenn repons)" for transient errors
-    const startTime = Date.now();
-    let delayedErrorTimer = null;
-    let hadResponse = false;
+  async function registerTfid(candidate){
+    try{
+      const res = await fetch(API + 'session/create', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ tfid: candidate }) });
+      const j = await res.json().catch(()=>null);
+      if(j && j.ok) return j.tfid || candidate;
+      return false;
+    }catch(e){ return false; }
+  }
 
-    const maxRetries = 1;
-    let attempt = 0;
-    let finalResult = null;
-    let finalError = null;
+  function getStoredTfid(){ try{ return localStorage.getItem(TF_KEY); }catch(e){ return null; } }
+  function setStoredTfid(tf){ try{ localStorage.setItem(TF_KEY, tf); }catch(e){} }
 
-    while(attempt <= maxRetries){
-      attempt++;
-      try {
-        const res = await fetchWithTimeout(API, {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({action:'chat', text})}, 420000);
-        // try JSON first
-        let j = null;
-        try { j = await res.clone().json(); } catch(e) { j = null; }
-        if(j && typeof j === 'object'){
-          finalResult = j;
-          break;
-        }
-        // fallback: try plain text
-        try {
-          const txt = await res.clone().text();
-          if(txt && txt.trim()){
-            finalResult = { text: txt.trim() };
-            break;
-          }
-        } catch(e){}
-        if(attempt <= maxRetries){
-          await new Promise(r=>setTimeout(r,3000));
-          continue;
-        } else {
-          finalResult = null;
-          break;
-        }
-      } catch (e){
-        finalError = e;
-        // If abort (timeout), break and show error immediately later
-        if(e && e.name === 'AbortError'){
-          finalResult = null;
-          break;
-        }
-        if(attempt <= maxRetries){
-          await new Promise(r=>setTimeout(r,3000));
-          continue;
-        } else {
-          finalResult = null;
-          break;
-        }
+  async function getOrCreateTfid(){
+    let tf = getStoredTfid(); if(tf) return tf;
+    let len = 7;
+    for(let round=0;round<6;round++){
+      for(let i=0;i<6;i++){
+        const cand = await genTfCandidate(len);
+        const ok = await registerTfid(cand);
+        if(ok){ setStoredTfid(cand); return cand; }
       }
+      len++;
     }
+    const fb = 'TF-' + Date.now(); await registerTfid(fb); setStoredTfid(fb); return fb;
+  }
 
-    // if no result yet, schedule delayed error only if under minErrorDelay
-    if(!finalResult && (!finalError || finalError.name !== 'AbortError')){
-      const elapsed = Date.now() - startTime;
-      if(elapsed < minErrorDelay){
-        delayedErrorTimer = setTimeout(()=>{
-          if(!hadResponse){
-            renderMessage({who:'bot', text:'(Pa jwenn repons)', images:null, audioUrl:null, ts:Date.now(), persist:true});
-          }
-        }, minErrorDelay - elapsed);
+  function renderSessionMessages(messages){
+    chatBox.innerHTML = '';
+    if(!Array.isArray(messages)) return;
+    for (const m of messages) {
+      const who = (m.from === 'user') ? 'user' : 'bot';
+      const ts = m.ts || Date.now();
+      if (m.type === 'text') {
+        if (m.text && m.text.length) renderMessage({ who, text: m.text, ts });
+      } else if (m.type === 'image') {
+        const imgs = [];
+        if (m.url && typeof m.url === 'string') imgs.push(m.url);
+        if (Array.isArray(m.url)) imgs.push(...m.url);
+        renderMessage({ who, text: null, images: imgs.length ? imgs : null, ts });
+      } else if (m.type === 'audio') {
+        const url = (m.url && typeof m.url === 'string') ? m.url : null;
+        renderMessage({ who, text: m.transcription || null, audioUrl: url, ts });
       } else {
-        // elapsed already >= minErrorDelay -> show error now
-        renderMessage({who:'bot', text:'(Pa jwenn repons)', images:null, audioUrl:null, ts:Date.now(), persist:true});
+        const txt = m.text || m.transcription || JSON.stringify(m).slice(0,2000);
+        renderMessage({ who, text: txt, ts });
       }
     }
+  }
 
-    // if we got a result, render it and cancel delayed error
-    if(finalResult){
-      hadResponse = true;
-      if(delayedErrorTimer) { clearTimeout(delayedErrorTimer); delayedErrorTimer = null; }
-      typing.stop();
-      const j = finalResult;
-      const imgUrls = extractImageUrlsFromResponse(j);
-      const assistantText = (j && j.text) ? j.text : (j && j.post_text) ? j.post_text : (j && j.response) ? j.response : null;
-      if(imgUrls.length){
-        renderMessage({who:'bot', text: assistantText || null, images: imgUrls, audioUrl:null, ts:Date.now(), persist:true});
+  async function fetchSessionAndRender(tfid) {
+    if(!tfid) return;
+    try {
+      const res = await fetchWithTimeout(API + 'session?tfid=' + encodeURIComponent(tfid), {}, 15000);
+      const j = await res.json().catch(()=>null);
+      if (j && j.ok && j.session && Array.isArray(j.session.messages)) {
+        renderSessionMessages(j.session.messages);
+        return j.session;
+      }
+    } catch(e){}
+    return null;
+  }
+
+  async function callChat(text){
+    if(!TFID) TFID = await getOrCreateTfid();
+    if(!text || text.length === 0) return;
+    if(text.length > MAX_TEXT){ renderMessage({who:'bot', text:'Tèks twò long. Limit ' + MAX_TEXT + ' karaktè.'}); return; }
+    renderMessage({ who:'user', text, ts: Date.now() });
+    const typing = createTypingController();
+    try {
+      const res = await fetchWithTimeout(API, { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ action:'chat', text, tfid: TFID }) }, 420000);
+      let j = null;
+      try { j = await res.clone().json(); } catch(e){ j = null; }
+      if (j && j.session && Array.isArray(j.session.messages)) {
+        typing.stop();
+        renderSessionMessages(j.session.messages);
         return;
       }
-      let assistant = assistantText;
-      if(!assistant){
-        if(j && j.raw && j.raw.response) assistant = j.raw.response;
-        else if(j && j.raw) assistant = typeof j.raw === 'string' ? j.raw : JSON.stringify(j.raw).slice(0,2000);
+      if (j && (j.text || j.post_text || j.imageUrl)) {
+        typing.stop();
+        if (j.imageUrl) {
+          renderMessage({ who:'bot', text: j.post_text || null, images: Array.isArray(j.imageUrl) ? j.imageUrl : [j.imageUrl], ts: Date.now() });
+        } else {
+          renderMessage({ who:'bot', text: j.text || j.post_text || null, ts: Date.now() });
+        }
+        await fetchSessionAndRender(TFID);
+        return;
       }
-      if(!assistant) assistant = '(Pa jwenn repons)';
-      renderMessage({who:'bot', text: assistant, images:null, audioUrl:null, ts:Date.now(), persist:true});
-      return;
-    }
-
-    // no finalResult -> if AbortError, stop typing and render error immediately
-    if(finalError && finalError.name === 'AbortError'){
-      if(delayedErrorTimer) { clearTimeout(delayedErrorTimer); delayedErrorTimer = null; }
+      try {
+        const txt = await res.clone().text();
+        if (txt && txt.trim()) {
+          typing.stop();
+          renderMessage({ who:'bot', text: txt.trim(), ts: Date.now() });
+          await fetchSessionAndRender(TFID);
+          return;
+        }
+      } catch(e){}
       typing.stop();
-      renderMessage({who:'bot', text:'(Pa jwenn repons)', images:null, audioUrl:null, ts:Date.now(), persist:true});
-      return;
+      renderMessage({ who:'bot', text:'(Pa jwenn repons)', ts: Date.now() });
+      await fetchSessionAndRender(TFID);
+    } catch (err) {
+      typing.stop();
+      renderMessage({ who:'bot', text:'(Pa jwenn repons)', ts: Date.now() });
+      setTimeout(()=> fetchSessionAndRender(TFID), 800);
     }
-
-    // else we did not get a response but we scheduled a delayed error — stop typing so UI shows waiting state
-    typing.stop();
-    // delayedErrorTimer will fire to show error after minErrorDelay if still no response
   }
 
-  sendBtn.addEventListener('click', async ()=>{
-    const text = (userInput.value || '').trim();
-    if(recording){ stopRecording(); return; }
-    if(text){
-      userInput.value = '';
-      updateSendIcon();
-      await callChat(text);
-    } else {
-      // start recording if no text
-      await startRecording();
-    }
-  });
-
-  userInput.addEventListener('keydown', (e)=>{
-    if(e.key === 'Enter' && !e.shiftKey && (e.ctrlKey || e.metaKey)){
-      e.preventDefault();
-      sendBtn.click();
-    }
-  });
-
-  function renderStoredConversation(){
-    const arr = loadStoredMessages();
-    chatBox.innerHTML = '';
-    arr.forEach(m => {
-      renderMessage({id:m.id, who:m.who, text:m.text || null, images:m.images || null, audioUrl:m.audioUrl || null, ts:m.ts || Date.now(), persist:false});
-    });
-    setTimeout(()=> chatBox.scrollTop = chatBox.scrollHeight, 80);
+  function createTypingController(){
+    const id = 'typing_' + Date.now() + '_' + Math.floor(Math.random()*1000);
+    const el = document.createElement('div'); el.className = 'message bot'; el.dataset.id = id;
+    const b = document.createElement('div'); b.className = 'bubble bot';
+    const dotsSpan = document.createElement('span'); dotsSpan.className = 'typing-dots'; dotsSpan.textContent = '●';
+    b.appendChild(dotsSpan); el.appendChild(b);
+    const meta = document.createElement('div'); meta.className='meta'; meta.textContent = '';
+    el.appendChild(meta); chatBox.appendChild(el); chatBox.scrollTop = chatBox.scrollHeight;
+    let state = 1; let running = true;
+    const interval = setInterval(()=>{ if(!running) return; state = state >= 3 ? 1 : state + 1; dotsSpan.textContent = '●'.repeat(state); }, 500);
+    return { el, stop: () => { running = false; clearInterval(interval); try{ if(el && el.parentNode) el.parentNode.removeChild(el); }catch(e){} } };
   }
 
-  renderStoredConversation();
-  // no default greeting
+  async function startRecording(){ if(userInput.value.trim()) return; if(!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) { alert('Mikwofòn pa disponib sou navigatè sa a.'); return; } try{ const stream = await navigator.mediaDevices.getUserMedia({audio:true}); recordedChunks = []; recorder = new MediaRecorder(stream); recorder.ondataavailable = e => { if(e.data && e.data.size) recordedChunks.push(e.data); }; recorder.onstop = async () => { const blob = new Blob(recordedChunks, {type:'audio/webm'}); const url = URL.createObjectURL(blob); renderMessage({who:'user', text:null, images:null, audioUrl:url, ts:Date.now()}); await sendBlobForTranscription(blob); stream.getTracks().forEach(t=>t.stop()); }; recorder.start(); recording = true; recordStart = Date.now(); progressRow.style.display = 'flex'; progressFill.style.width = '0%'; progressLabel.textContent = '0s'; startRecordTimer(); updateSendIcon(); }catch(err){ alert('Pa jwenn aksè mikwofòn: ' + (err && err.message ? err.message : err)); } }
+  function stopRecording(){ if(recorder && recorder.state !== 'inactive') recorder.stop(); recording = false; stopRecordTimer(); progressRow.style.display = 'none'; updateSendIcon(); }
+  function startRecordTimer(){ recordTimer = setInterval(()=>{ const s = Math.floor((Date.now() - recordStart)/1000); progressLabel.textContent = s + 's'; const pct = Math.min(100, (s / maxRecordSec) * 100); progressFill.style.width = pct + '%'; if(s >= maxRecordSec) stopRecording(); }, 200); }
+  function stopRecordTimer(){ clearInterval(recordTimer); progressFill.style.width = '0%'; progressLabel.textContent = '0s'; }
+
+  async function sendBlobForTranscription(blob){ if(!TFID) TFID = await getOrCreateTfid(); try{ const fd = new FormData(); fd.append('file', blob, 'voice.webm'); fd.append('action', 'transcribe'); fd.append('tfid', TFID); const res = await fetchWithTimeout(API, {method:'POST', body: fd}, 420000); let j = null; try{ j = await res.clone().json(); }catch(e){ j = null; } if(!j){ try{ const txt = await res.clone().text(); if(txt && txt.trim()) j = { text: txt.trim() }; }catch(e){} } const text = (j && j.text) ? j.text : (j && j.aiRaw && j.aiRaw.text) ? j.aiRaw.text : null; if(text){ renderMessage({who:'user', text, images:null, audioUrl:null, ts:Date.now()}); await callChat(text); } else { renderMessage({who:'bot', text:'Transcription pa jwenn tèks.', images:null, audioUrl:null, ts:Date.now()}); } }catch(e){ if(e && e.name === 'AbortError'){ renderMessage({who:'bot', text:'(Pa jwenn repons)', images:null, audioUrl:null, ts:Date.now()}); } else { renderMessage({who:'bot', text:'Erè pandan transcription: ' + (e && e.message ? e.message : e), images:null, audioUrl:null, ts:Date.now()}); } } }
+
+  sendBtn.addEventListener('click', async ()=>{ const text = (userInput.value || '').trim(); if(recording){ stopRecording(); return; } if(text){ userInput.value = ''; updateSendIcon(); await callChat(text); } else { await startRecording(); } });
+  userInput.addEventListener('keydown', (e)=>{ if(e.key === 'Enter' && !e.shiftKey && (e.ctrlKey || e.metaKey)){ e.preventDefault(); sendBtn.click(); } });
+
+  (async ()=>{ TFID = await getOrCreateTfid(); await fetchSessionAndRender(TFID); updateSendIcon(); })();
 
   if(window.visualViewport){
-    const onView = () => {
-      const vv = window.visualViewport;
-      const header = document.querySelector('header');
-      header.style.top = (vv.offsetTop || 0) + 'px';
-      const kbHeight = window.innerHeight - vv.height - (vv.offsetTop || 0);
-      const bottomZone = document.querySelector('.bottom-zone');
-      const formH = bottomZone.offsetHeight || 140;
-      const bottomPad = Math.max(formH, formH + kbHeight);
-      document.querySelector('.chat-box').style.bottom = bottomPad + 'px';
-      if(document.activeElement === userInput) setTimeout(()=> chatBox.scrollTop = chatBox.scrollHeight, 100);
-    };
+    const onView = () => { const vv = window.visualViewport; const header = document.querySelector('header'); header.style.top = (vv.offsetTop || 0) + 'px'; const kbHeight = window.innerHeight - vv.height - (vv.offsetTop || 0); const bottomZone = document.querySelector('.bottom-zone'); const formH = bottomZone.offsetHeight || 140; const bottomPad = Math.max(formH, formH + kbHeight); document.querySelector('.chat-box').style.bottom = bottomPad + 'px'; if(document.activeElement === userInput) setTimeout(()=> chatBox.scrollTop = chatBox.scrollHeight, 100); };
     window.visualViewport.addEventListener('resize', onView);
     window.visualViewport.addEventListener('scroll', onView);
     window.addEventListener('resize', onView);
   }
 
-  updateSendIcon();
+  window.toggleSidebar = ()=> { };
 
-  window.toggleSidebar = ()=> { /* no sidebar */ };
-
-  // recording helpers (same behavior as before)
-  async function startRecording(){
-    if(userInput.value.trim()) return;
-    if(!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) { alert('Mikwofòn pa disponib sou navigatè sa a.'); return; }
-    try {
-      const stream = await navigator.mediaDevices.getUserMedia({audio:true});
-      recordedChunks = [];
-      recorder = new MediaRecorder(stream);
-      recorder.ondataavailable = e => { if(e.data && e.data.size) recordedChunks.push(e.data); };
-      recorder.onstop = async () => {
-        const blob = new Blob(recordedChunks, {type:'audio/webm'});
-        const url = URL.createObjectURL(blob);
-        renderMessage({who:'user', text:null, images:null, audioUrl:url, ts:Date.now(), persist:true});
-        await sendBlobForTranscription(blob);
-        stream.getTracks().forEach(t=>t.stop());
-      };
-      recorder.start();
-      recording = true;
-      recordStart = Date.now();
-      progressRow.style.display = 'flex';
-      progressFill.style.width = '0%';
-      progressLabel.textContent = '0s';
-      startRecordTimer();
-      updateSendIcon();
-    } catch (err){
-      alert('Pa jwenn aksè mikwofòn: ' + (err && err.message ? err.message : err));
-    }
-  }
-  function stopRecording(){ if(recorder && recorder.state !== 'inactive') recorder.stop(); recording = false; stopRecordTimer(); progressRow.style.display = 'none'; updateSendIcon(); }
-  function startRecordTimer(){ recordTimer = setInterval(()=>{ const s = Math.floor((Date.now() - recordStart)/1000); progressLabel.textContent = s + 's'; const pct = Math.min(100, (s / maxRecordSec) * 100); progressFill.style.width = pct + '%'; if(s >= maxRecordSec) stopRecording(); }, 200); }
-  function stopRecordTimer(){ clearInterval(recordTimer); progressFill.style.width = '0%'; progressLabel.textContent = '0s'; }
-
-  async function sendBlobForTranscription(blob){
-    try {
-      const fd = new FormData();
-      fd.append('file', blob, 'voice.webm');
-      fd.append('action', 'transcribe');
-      const res = await fetchWithTimeout(API, {method:'POST', body: fd}, 420000);
-      let j = null;
-      try { j = await res.clone().json(); } catch(e){ j = null; }
-      if(!j){
-        try { const txt = await res.clone().text(); if(txt && txt.trim()) j = { text: txt.trim() }; }catch(e){}
-      }
-      const text = (j && j.text) ? j.text : (j && j.aiRaw && j.aiRaw.text) ? j.aiRaw.text : null;
-      if(text){
-        renderMessage({who:'user', text, images:null, audioUrl:null, ts:Date.now(), persist:true});
-        await callChat(text);
-      } else {
-        renderMessage({who:'bot', text:'Transcription pa jwenn tèks.', images:null, audioUrl:null, ts:Date.now(), persist:true});
-      }
-    } catch (e){
-      if(e && e.name === 'AbortError'){
-        renderMessage({who:'bot', text:'(Pa jwenn repons)', images:null, audioUrl:null, ts:Date.now(), persist:true});
-      } else {
-        renderMessage({who:'bot', text:'Erè pandan transcription: ' + (e && e.message ? e.message : e), images:null, audioUrl:null, ts:Date.now(), persist:true});
-      }
-    }
+  if ('serviceWorker' in navigator) {
+    navigator.serviceWorker.register('/sw.js', { scope: '/' }).then(()=>{}).catch(()=>{});
   }
 
 })();
 </script>
 </body>
-  </html>
+    </html>
