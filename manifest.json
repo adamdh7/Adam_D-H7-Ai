@@ -7,7 +7,7 @@
   "start_url": "/",
   "scope": "/",
   "display": "standalone",
-  "display_override": ["fullscreen", "standalone", "minimal-ui"],
+  "display_override": ["fullscreen","standalone","minimal-ui"],
   "orientation": "portrait",
   "theme_color": "#00000000",
   "background_color": "#00000000",
@@ -20,7 +20,7 @@
       "purpose": "any"
     },
     {
-      "src": "https://adamdh7ai.pages.dev/asset/1024.png",
+      "src": "https://adamdh7ai.pages.dev/asset/1024.jpg",
       "sizes": "1024x1024",
       "type": "image/jpeg",
       "purpose": "any"
