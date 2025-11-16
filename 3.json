@@ -70,7 +70,6 @@
 
     /* ----- WhatsApp-like in-card text styles ----- */
     .wa-strong{font-weight:700; display:inline-block; margin:6px 0; cursor:pointer}
-    .wa-strong .marker{opacity:0.9; margin:0 2px; color:var(--muted)}
     .wa-quote{
       display:flex;
       gap:10px;
@@ -120,20 +119,43 @@
       cursor:pointer;
     }
     .wa-paragraph{margin:6px 0;}
-    /* quick feedback on copy */
-    .copied-flash{position:relative;}
-    .copied-flash::after{
-      content:'✔';
-      position:absolute;
-      right:-18px;
-      top:0;
-      font-size:12px;
-      opacity:0;
-      transform:translateY(-4px);
-      transition:transform .18s ease, opacity .18s ease;
-      color:#7CFC00;
+
+    /* bullets */
+    .wa-bullet{
+      display:flex;
+      gap:10px;
+      align-items:flex-start;
+      margin:6px 0;
+      cursor:pointer;
     }
-    .copied-flash.copied::after{ opacity:1; transform:translateY(0); }
+    .wa-bullet .bullet{
+      flex:0 0 18px;
+      font-size:16px;
+      line-height:1.45;
+      color:var(--muted);
+    }
+    .wa-bullet .b-content{
+      flex:1;
+      line-height:1.45;
+      color:var(--ai-text);
+      white-space:pre-wrap;
+    }
+
+    /* underline like WhatsApp */
+    .wa-underline {
+      text-decoration: underline;
+      display: inline-block;
+      cursor: pointer;
+    }
+
+    /* copy feedback */
+    [data-plain].copied { opacity: 0.85; transform: translateY(-2px); transition: .18s ease; }
+    [data-plain].copied::after {
+      content: ' ✔';
+      color: #7CFC00;
+      font-size: 12px;
+      margin-left: 6px;
+    }
   </style>
 </head>
 <body>
@@ -203,85 +225,85 @@
   function getStoredTfid(){ try{ return localStorage.getItem(TF_KEY); }catch(e){ return null; } }
   function setStoredTfid(tf){ try{ localStorage.setItem(TF_KEY, tf); }catch(e){} }
 
-  /*
-    New formatMessage:
-    - Works on the raw text so we can keep the original markers visible (asterisks, backticks, >, -)
-    - Produces HTML blocks with data-plain attributes containing the inner text WITHOUT markers
-    - Click on any formatted element copies data-plain (only the inner text)
+  /* formatMessage:
+     - extract fenced code blocks, quotes, bullets first (so formatting inside those is preserved)
+     - then handle inline code, bold (*...*), underline (~...~)
+     - bullets/quotes/codeblocks are restored as elements with data-plain containing inner text (no markers)
+     - click handler (below) copies data-plain
   */
   function formatMessage(raw) {
     if (raw === null || raw === undefined) return '';
-    // normalize newlines
     let s = String(raw).replace(/\r\n/g,'\n').replace(/\r/g,'\n');
 
-    // 1) extract code blocks first (```...```)
+    // 1) fenced code blocks ```...```
     const codeBlocks = [];
     s = s.replace(/```([\s\S]*?)```/g, (m, inner) => {
-      const idx = codeBlocks.length;
-      codeBlocks.push(inner);
+      const idx = codeBlocks.length; codeBlocks.push(inner);
       return `@@CODEBLOCK_${idx}@@`;
     });
 
-    // 2) extract blockquotes (consecutive lines starting with >)
+    // 2) consecutive blockquotes (lines starting with '>')
     const quotes = [];
-    s = s.replace(/(^|\n)((?:>\s?.*(?:\n|$))+)/g, (m, prefixAndBlock) => {
-      // m contains leading newline too; capture the block (group 2)
-      // store group 2 (the actual quote lines)
+    s = s.replace(/(^|\n)((?:>\s?.*(?:\n|$))+)/g, (m) => {
       const block = arguments[2];
-      const idx = quotes.length;
-      quotes.push(block);
+      const idx = quotes.length; quotes.push(block);
       return `\n@@QUOTE_${idx}@@\n`;
     });
 
-    // 3) handle inline formatting on the remaining raw text (we keep markers visible)
-    // a) inline code and code (single backticks)
-    s = s.replace(/(`+)([\s\S]*?)\1/g, (m, markers, inner) => {
-      const disp = escapeHtml(markers) + escapeHtml(inner) + escapeHtml(markers);
-      return `<span class="wa-inline" data-plain="${escapeAttr(inner)}">${disp}</span>`;
+    // 3) bullet lines starting with * or - (at line start)
+    const bullets = [];
+    s = s.replace(/(^|\n)\s*([*-])\s+(.*)(?=\n|$)/g, (m, pre, marker, content) => {
+      const idx = bullets.length; bullets.push(content);
+      return `${pre}@@BULLET_${idx}@@`;
     });
 
-    // b) strikethrough with tildes ~~...~~ (require at least 2)
-    s = s.replace(/(~{2,})([\s\S]*?)\1/g, (m, markers, inner) => {
-      const disp = escapeHtml(markers) + escapeHtml(inner) + escapeHtml(markers);
-      return `<del data-plain="${escapeAttr(inner)}">${disp}</del>`;
+    // Helpers for safe output
+    function escHtml(t){ return escapeHtml(t); }
+    function escAttr(t){ return escapeAttr(t); }
+
+    // 4) inline code: `...` (handles multiple backticks groups)
+    s = s.replace(/(`+)([\s\S]*?)\1/g, (m, ticks, inner) => {
+      return `<span class="wa-inline" data-plain="${escAttr(inner)}">${escHtml(inner)}</span>`;
     });
 
-    // c) bold/strong with asterisks (support matching number of asterisks)
-    // capture group 1 = markers (one or more *), group 2 = inner
-    s = s.replace(/(\*{1,})([\s\S]*?)\1/g, (m, markers, inner) => {
-      const disp = escapeHtml(markers) + escapeHtml(inner) + escapeHtml(markers);
-      return `<span class="wa-strong" data-plain="${escapeAttr(inner)}">${disp}</span>`;
+    // 5) underline with single ~...~
+    s = s.replace(/~{1}([\s\S]*?)~{1}/g, (m, inner) => {
+      return `<span class="wa-underline" data-plain="${escAttr(inner)}">${escHtml(inner)}</span>`;
     });
 
-    // d) bullets/hyphen at line start should NOT be transformed into lists.
-    // We leave hyphens as-is. (No list conversion)
+    // 6) bold with asterisks: require matching group of asterisks on both sides
+    // avoid capturing across paragraphs; do non-greedy inner match
+    s = s.replace(/(\*{1,})(?!\s)([\s\S]*?)(?<!\s)\1/g, (m, stars, inner) => {
+      return `<span class="wa-strong" data-plain="${escAttr(inner)}">${escHtml(inner)}</span>`;
+    });
 
-    // 4) Now restore placeholders for quotes and codeblocks (use escaped inner for safe display,
-    // but data-plain will contain the raw inner without the leading markers for quotes or raw for code)
-    // Restore quotes
+    // 7) restore bullets
+    s = s.replace(/@@BULLET_(\d+)@@/g, (m, idx) => {
+      const i = Number(idx);
+      const inner = bullets[i] || '';
+      const disp = escHtml(inner).replace(/\n/g,'<br>');
+      return `<div class="wa-bullet" data-plain="${escAttr(inner)}"><div class="bullet">•</div><div class="b-content">${disp}</div></div>`;
+    });
+
+    // 8) restore quotes
     s = s.replace(/@@QUOTE_(\d+)@@/g, (m, idx) => {
       const i = Number(idx);
       const rawBlock = quotes[i] || '';
-      // rawBlock contains lines like "> line1\n> line2\n"
-      // For data-plain we want the inner text without the '>' prefixes
       const plain = rawBlock.split('\n').map(l => l.replace(/^\s*>\s?/, '')).filter(Boolean).join('\n');
-      const disp = escapeHtml(rawBlock).replace(/\n/g,'<br>');
-      return `<div class="wa-quote" data-plain="${escapeAttr(plain)}"><div class="bar"></div><div class="content">${disp}</div></div>`;
+      const disp = escHtml(rawBlock).replace(/\n/g,'<br>');
+      return `<div class="wa-quote" data-plain="${escAttr(plain)}"><div class="bar"></div><div class="content">${disp}</div></div>`;
     });
 
-    // Restore codeblocks
+    // 9) restore codeblocks
     s = s.replace(/@@CODEBLOCK_(\d+)@@/g, (m, idx) => {
       const i = Number(idx);
       const inner = codeBlocks[i] || '';
-      const disp = escapeHtml(inner);
-      return `<pre class="wa-code-block" data-plain="${escapeAttr(inner)}">${disp}</pre>`;
+      const disp = escHtml(inner);
+      return `<pre class="wa-code-block" data-plain="${escAttr(inner)}">${disp}</pre>`;
     });
 
-    // 5) split paragraphs by double newlines and convert single newline -> <br>
-    const paragraphs = s.split(/\n{2,}/g).map(p => {
-      return p.replace(/\n/g, '<br>');
-    });
-
+    // 10) paragraphs: split on double newlines, single newline -> <br>
+    const paragraphs = s.split(/\n{2,}/g).map(p => p.replace(/\n/g,'<br>'));
     return paragraphs.map(p => `<div class="wa-paragraph">${p}</div>`).join('');
   }
 
@@ -346,35 +368,33 @@
   closeModalBtn.addEventListener('click', closeModal);
   modal.addEventListener('click', (e)=>{ if(e.target === modal) closeModal(); });
 
-  // Copy-on-click for any element that has data-plain attribute.
-  // Copies data-plain text only (no markers), shows small visual feedback.
+  // Copy-on-click handler: copies only the data-plain attribute (inner text, no markers)
   document.addEventListener('click', (e) => {
     const el = e.target.closest('[data-plain]');
     if (!el) return;
     const txt = el.getAttribute('data-plain') || '';
     if (!txt) return;
-    // copy
-    if (navigator.clipboard && navigator.clipboard.writeText) {
-      navigator.clipboard.writeText(txt).then(() => {
-        el.classList.add('copied');
-        setTimeout(()=> el.classList.remove('copied'), 800);
-      }).catch(() => {
+    const copy = () => {
+      if (navigator.clipboard && navigator.clipboard.writeText) {
+        return navigator.clipboard.writeText(txt);
+      } else {
         // fallback
         const ta = document.createElement('textarea');
         ta.value = txt;
         document.body.appendChild(ta);
         ta.select();
-        try { document.execCommand('copy'); el.classList.add('copied'); setTimeout(()=> el.classList.remove('copied'), 800); } catch(e){ alert('Kopi echwe'); }
+        try { document.execCommand('copy'); } catch(e){ /* ignore */ }
         ta.remove();
-      });
-    } else {
-      const ta = document.createElement('textarea');
-      ta.value = txt;
-      document.body.appendChild(ta);
-      ta.select();
-      try { document.execCommand('copy'); el.classList.add('copied'); setTimeout(()=> el.classList.remove('copied'), 800); } catch(e){ alert('Kopi echwe'); }
-      ta.remove();
-    }
+        return Promise.resolve();
+      }
+    };
+    copy().then(()=> {
+      el.classList.add('copied');
+      setTimeout(()=> el.classList.remove('copied'), 800);
+    }).catch(()=> {
+      // fallback alert
+      alert('Kopi echwe');
+    });
   });
 
   function updateSendIcon(){ const txt = (userInput.value || '').trim(); if(recording){ sendBtn.classList.add('recording'); sendIcon.innerHTML = '<path d="M6 6h12v12H6z" fill="#fff"/>'; } else if(txt){ sendBtn.classList.remove('recording'); sendIcon.innerHTML = '<path d="M2 21L23 12L2 3L8 12L2 21Z" fill="#fff"/>'; } else { sendBtn.classList.remove('recording'); sendIcon.innerHTML = '<path d="M12 14a3 3 0 0 0 3-3V5a3 3 0 0 0-6 0v6a3 3 0 0 0 3 3zm5-3a5 5 0 0 1-10 0H5a7 7 0 0 0 14 0h-2z"/>'; } }
