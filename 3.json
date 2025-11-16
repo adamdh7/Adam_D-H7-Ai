@@ -7,7 +7,6 @@
   <link rel="manifest" href="/manifest.json">
   <meta name="theme-color" content="#000000" />
   <link rel="apple-touch-icon" href="https://adamdh7ai.pages.dev/asset/1024.png">
-
   <style>
     :root{
       --bg:#000; --panel:#000; --ai-bubble:#262626; --ai-text:#d0d0d0;
@@ -53,8 +52,6 @@
     .send.recording{background:linear-gradient(180deg,#9b1b1b,#7a1515)}
     .softbreak{word-break:break-word;white-space:pre-wrap}
     .typing-dots { font-weight:800; letter-spacing:3px; display:inline-block; min-width:48px; text-align:left; }
-
-    /* formatted content styles (applies only to bot messages) */
     .wa-paragraph{margin:6px 0;}
     .wa-strong{font-weight:700; display:inline; cursor:pointer;}
     .wa-inline{background:var(--wa-inline-bg); padding:2px 8px; border-radius:6px; font-family:ui-monospace,Menlo,Monaco,monospace; font-size:14px; border:1px solid rgba(255,255,255,0.02); display:inline-block; cursor:pointer;}
@@ -113,7 +110,6 @@
 
   function escapeAttr(s){ return String(s === null || s === undefined ? '' : s).replace(/&/g,'&amp;').replace(/"/g,'&quot;').replace(/</g,'&lt;'); }
 
-  // collect plain text from a node (prefers data-plain if present)
   function collectPlain(node){
     if(!node) return '';
     if(node.nodeType === Node.TEXT_NODE) return node.nodeValue || '';
@@ -126,7 +122,6 @@
     return out;
   }
 
-  // buildInlineFragment: handles inline code `code`, then strikethrough, underline, bold
   function buildInlineFragment(text){
     const frag = document.createDocumentFragment();
     if(!text) return frag;
@@ -149,7 +144,6 @@
 
   function appendFormattedText(parent, text){
     if(!text) return;
-    // strikethrough ~~...~~
     let pos = 0;
     const strikeRe = /~~([\s\S]*?)~~/g;
     let mm;
@@ -201,7 +195,6 @@
     if (pos < text.length) parent.appendChild(document.createTextNode(text.slice(pos)));
   }
 
-  // build paragraph fragment: bullets for lines starting with - or * followed by space
   function buildParagraphFragment(para){
     const frag = document.createDocumentFragment();
     const lines = para.split('\n');
@@ -235,21 +228,16 @@
     return frag;
   }
 
-  // formatToFragment: only handles codeblocks and inline formatting; QUOTES (>) REMOVED per request
   function formatToFragment(raw){
     const frag = document.createDocumentFragment();
     if (raw === null || raw === undefined) return frag;
     let s = String(raw).replace(/\r\n/g,'\n').replace(/\r/g,'\n');
-
-    // extract code blocks (```...```)
     const codeBlocks = [];
     s = s.replace(/```([\s\S]*?)```/g, (m, inner) => {
       const idx = codeBlocks.length;
       codeBlocks.push(inner);
       return `@@CODEBLOCK_${idx}@@`;
     });
-
-    // split into paragraphs
     const paragraphs = s.split(/\n{2,}/g);
     paragraphs.forEach(par => {
       const codeMatch = par.match(/^@@CODEBLOCK_(\d+)@@$/);
@@ -263,8 +251,6 @@
         frag.appendChild(pre);
         return;
       }
-
-      // handle inline codeblock tokens inside paragraph
       let cursor = 0;
       const tokenRe = /(@@CODEBLOCK_(\d+)@@)/g;
       let m;
@@ -282,33 +268,24 @@
       if (cursor < par.length) container.appendChild(buildParagraphFragment(par.slice(cursor)));
       frag.appendChild(container);
     });
-
     return frag;
   }
 
-  // renderMessage - apply formatting only when who === 'bot'
   function renderMessage({id=null,who='bot', text=null, images=null, audioUrl=null, ts=Date.now(), persist=false}) {
     const msg = document.createElement('div');
     msg.className = 'message ' + (who === 'user' ? 'user' : 'bot');
     msg.dataset.id = id || ('m_'+Date.now()+'_'+Math.floor(Math.random()*1000));
-
     if (text) {
       const b = document.createElement('div');
       b.className = 'bubble ' + (who === 'user' ? 'user' : 'bot');
-
       if (who === 'bot') {
-        // AI message: apply full formatting
         const frag = formatToFragment(text);
         b.appendChild(frag);
       } else {
-        // User message: raw text only, preserve newlines (no markup processing)
-        // Use textContent so markers like * or ` stay visible and are not interpreted
         b.textContent = text;
       }
-
       msg.appendChild(b);
     }
-
     if (Array.isArray(images) && images.length) {
       const container = document.createElement('div');
       container.className = 'message-images';
@@ -333,7 +310,6 @@
       }
       msg.appendChild(container);
     }
-
     if (audioUrl) {
       const ap = document.createElement('div');
       ap.className = 'audio-player';
@@ -345,12 +321,10 @@
       ap.appendChild(a);
       msg.appendChild(ap);
     }
-
     const meta = document.createElement('div');
     meta.className = 'meta';
     meta.textContent = new Date(ts).toLocaleTimeString();
     msg.appendChild(meta);
-
     chatBox.appendChild(msg);
     setTimeout(()=> chatBox.scrollTop = chatBox.scrollHeight, 70);
     return msg;
@@ -361,7 +335,6 @@
   closeModalBtn.addEventListener('click', closeModal);
   modal.addEventListener('click', (e)=>{ if(e.target === modal) closeModal(); });
 
-  // copy-on-click: only elements with data-plain (they exist only in bot messages)
   document.addEventListener('click', (e) => {
     const el = e.target.closest('[data-plain]');
     if (!el) return;
@@ -384,7 +357,6 @@
     ta.remove();
   }
 
-  // --- rest network/session logic kept same as before (unchanged) ---
   function updateSendIcon(){ const txt = (userInput.value || '').trim(); if(recording){ sendBtn.classList.add('recording'); sendIcon.innerHTML = '<path d="M6 6h12v12H6z" fill="#fff"/>'; } else if(txt){ sendBtn.classList.remove('recording'); sendIcon.innerHTML = '<path d="M2 21L23 12L2 3L8 12L2 21Z" fill="#fff"/>'; } else { sendBtn.classList.remove('recording'); sendIcon.innerHTML = '<path d="M12 14a3 3 0 0 0 3-3V5a3 3 0 0 0-6 0v6a3 3 0 0 0 3 3zm5-3a5 5 0 0 1-10 0H5a7 7 0 0 0 14 0h-2z"/>'; } }
   userInput.addEventListener('input', updateSendIcon);
 
@@ -483,19 +455,16 @@
     if(!text || text.length === 0) return;
     if(text.length > MAX_TEXT){ renderMessage({who:'bot', text:'Tèks twò long. Limit ' + MAX_TEXT + ' karaktè.'}); return; }
     renderMessage({ who:'user', text, ts: Date.now() });
-
     const typing = createTypingController();
     try {
       const res = await fetchWithTimeout(API, { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ action:'chat', text, tfid: TFID }) }, 420000);
       let j = null;
       try { j = await res.clone().json(); } catch(e){ j = null; }
-
       if (j && j.session && Array.isArray(j.session.messages)) {
         typing.stop();
         renderSessionMessages(j.session.messages);
         return;
       }
-
       if (j && (j.text || j.post_text || j.imageUrl)) {
         typing.stop();
         if (j.imageUrl) {
@@ -506,7 +475,6 @@
         await fetchSessionAndRender(TFID);
         return;
       }
-
       try {
         const txt = await res.clone().text();
         if (txt && txt.trim()) {
