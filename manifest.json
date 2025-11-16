@@ -1,0 +1,42 @@
+{
+  "id": "https://adamdh7ai.pages.dev/",
+  "dir": "ltr",
+  "lang": "fr",
+  "name": "Adam_D'H7",
+  "short_name": "Adam_D'H7",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "display_override": ["fullscreen", "standalone", "minimal-ui"],
+  "orientation": "portrait",
+  "theme_color": "#00000000",
+  "background_color": "#00000000",
+  "description": "Adam_D'H7",
+  "icons": [
+    {
+      "src": "https://adamdh7ai.pages.dev/asset/192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "https://adamdh7ai.pages.dev/asset/1024.jpg",
+      "sizes": "1024x1024",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "https://adamdh7ai.pages.dev/asset/512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any maskable"
+    }
+  ],
+  "screenshots": [
+    {
+      "src": "https://adamdh7ai.pages.dev/asset/screen.png",
+      "sizes": "1024x1024",
+      "type": "image/png"
+    }
+  ]
+}
