@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,viewport-fit=cover"/>
-  <title>Adam_D'H7 — Assistant multimédia</title>
+  <title>Adam_D'H7</title>
 
   <!-- PWA manifest & theme -->
   <link rel="manifest" href="/manifest.json">
@@ -96,7 +96,7 @@
 
   <div id="modal" style="display:none;align-items:center;justify-content:center;">
     <div class="controls">
-      <button id="downloadImgBtn">Download</button>
+      <button id="downloadImgBtn"></button>
       <button id="closeModalBtn">✖</button>
     </div>
     <img id="modalImg" src="" alt="Preview"/>
@@ -110,7 +110,7 @@
 (() => {
   const API = 'https://adamdh7.adamdh7.workers.dev/';
   const TF_KEY = 'tfid_v1';
-  const MAX_TEXT = 7777777;
+  const MAX_TEXT = 10000;
   const chatBox = document.getElementById('chatBox');
   const userInput = document.getElementById('userInput');
   const sendBtn = document.getElementById('sendBtn');
