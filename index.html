@@ -1,0 +1,90 @@
+<!doctype html>
+<html lang="ht">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>D'H7 | Tergene</title>
+</head>
+<body>
+<script>
+(async function(){
+  // detecte si yon string sanble ak HTML
+  const looksLikeHtml = s => typeof s === 'string' && /<\s*(?:!doctype|html|head|body|script|div|<\/)/i.test(s.trim());
+
+  // rechèch rekursif HTML andedan obj/tabl JSON
+  function searchHtml(node){
+    if(!node) return null;
+    if(typeof node === 'string') return looksLikeHtml(node) ? node : null;
+    if(Array.isArray(node)){
+      for(const e of node){
+        const r = searchHtml(e);
+        if(r) return r;
+      }
+      return null;
+    }
+    if(typeof node === 'object'){
+      const keys = ['index.html','index','html','content','body','source','data'];
+      for(const k of keys){
+        if(k in node && typeof node[k] === 'string' && looksLikeHtml(node[k])) return node[k];
+      }
+      for(const k in node){
+        if(!Object.prototype.hasOwnProperty.call(node,k)) continue;
+        const r = searchHtml(node[k]);
+        if(r) return r;
+      }
+    }
+    return null;
+  }
+
+  function escapeHtml(str){ return String(str).replace(/[&<>"']/g, s=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[s])); }
+
+  try {
+    const res = await fetch('./3.json', { cache: 'no-store' });
+    const ct = (res.headers.get('content-type') || '').toLowerCase();
+    const text = await res.text();
+
+    // si sèvè a retounen non-ok (eg. 404) — si li HTML, ekri li dirèkteman; sinon montre erè kout
+    if(!res.ok){
+      if(looksLikeHtml(text)){
+        document.open(); document.write(text); document.close(); return;
+      }
+      document.open();
+      document.write('<!doctype html><meta charset="utf-8"><title>Erreur HTTP</title><pre style="white-space:pre-wrap;padding:16px;font-family:monospace">HTTP ' + res.status + ' ' + (res.statusText || '') + '\\n\\n' + escapeHtml(String(text).slice(0,200)) + '</pre>');
+      document.close();
+      return;
+    }
+
+    // si content-type endike HTML oswa tèks sanble HTML -> ekri li
+    if(ct.includes('text/html') || looksLikeHtml(text)){
+      document.open(); document.write(text); document.close(); return;
+    }
+
+    // otreman, eseye JSON.parse — si echwe, konsidere kòm tèks (pa HTML)
+    let parsed;
+    try { parsed = JSON.parse(text); } catch(e) { parsed = text; }
+
+    // si parsing retounen string HTML
+    if(typeof parsed === 'string' && looksLikeHtml(parsed)){
+      document.open(); document.write(parsed); document.close(); return;
+    }
+
+    // chèche HTML andedan JSON la
+    const html = searchHtml(parsed);
+    if(html){
+      document.open(); document.write(html); document.close(); return;
+    }
+
+    // pa jwenn anyen: montre mesaj erè
+    document.open();
+    document.write('<!doctype html><meta charset="utf-8"><title>Erreur</title><pre style="white-space:pre-wrap;padding:16px;font-family:monospace">Aucun index.html trouvé dans 3.json.</pre>');
+    document.close();
+
+  } catch (err) {
+    document.open();
+    document.write('<!doctype html><meta charset="utf-8"><title>Erreur</title><pre style="white-space:pre-wrap;padding:16px;font-family:monospace">Erreur: ' + escapeHtml(String(err && err.message ? err.message : err)) + '</pre>');
+    document.close();
+  }
+})();
+</script>
+</body>
+  </html>
