@@ -1,4 +1,5 @@
 <!doctype html>
+
 <html lang="ht">
 <head>
   <meta charset="utf-8" />
@@ -60,37 +61,80 @@
     .wa-underline{ text-decoration: underline; cursor: pointer; display:inline; }
     .copied-flash{position:relative; display:inline-block;}
     .copied-flash::after{ content:'✔'; position:absolute; right:-18px; top:0; font-size:12px; opacity:0; transform:translateY(-4px); transition:transform .18s ease, opacity .18s ease; color:#7CFC00; }
-    .copied-flash.copied::after{ opacity:1; transform:translateY(0); }
+    .copied-flash.copied::after{ opacity:1; transform:translateY(0); }/* Modal overlay styles: click an AI-sent image to open a full black overlay with image and a close button */
+#modal{
+  position:fixed;
+  left:0;
+  top:0;
+  right:0;
+  bottom:0;
+  background:#000;
+  display:none;
+  align-items:center;
+  justify-content:center;
+  z-index:100;
+}
+#modal .controls{
+  position:absolute;
+  top:16px;
+  right:16px;
+  display:flex;
+  gap:8px;
+  z-index:110;
+}
+#closeModalBtn{
+  background:transparent;
+  border:none;
+  color:var(--ai-text);
+  font-size:28px;
+  line-height:1;
+  padding:8px;
+  border-radius:8px;
+  cursor:pointer;
+  font-family:Arial, Helvetica, sans-serif;
+}
+#closeModalBtn:focus{ outline:2px solid rgba(255,255,255,0.06); }
+#downloadImgBtn{
+  background:transparent;
+  border:1px solid rgba(255,255,255,0.06);
+  color:var(--ai-text);
+  padding:8px 10px;
+  border-radius:8px;
+  cursor:pointer;
+  font-size:13px;
+}
+#modalImg{
+  max-width:92%;
+  max-height:92%;
+  object-fit:contain;
+  border-radius:8px;
+  box-shadow:0 12px 40px rgba(0,0,0,0.6);
+  z-index:105;
+}
+
   </style>
 </head>
 <body>
   <header><div class="title">Adam_D'H7</div></header>
-  <main id="chatBox" class="chat-box" aria-live="polite"></main>
-
-  <div class="bottom-zone" aria-hidden="false">
+  <main id="chatBox" class="chat-box" aria-live="polite"></main>  <div class="bottom-zone" aria-hidden="false">
     <div id="progressRow" class="progress-row" style="display:none">
       <div id="progressLabel" class="progress-label">0s</div>
       <div class="progress-bar" aria-hidden="true"><div id="progressFill" class="progress-fill" style="width:0%"></div></div>
       <div style="width:36px;text-align:right;color:var(--muted);font-size:12px" id="progressLimit">60s</div>
-    </div>
+    </div><form id="chatForm" autocomplete="off" novalidate style="display:flex;align-items:flex-end;gap:10px">
+  <div class="input-wrap" style="flex:1"><textarea id="userInput" placeholder="Ekris... oswa peze bouton vwa pou anrejistre" aria-label="Message"></textarea></div>
+  <button id="sendBtn" class="send" type="button" aria-label="Send">
+    <svg id="sendIcon" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3c-.6 0-1 .4-1 1v8h-8c-.6 0-1 .4-1 1 0 .3.1.6.3.8l12 10c.4.3 1 .3 1.4 0l8-6c.4-.3.6-.8.5-1.3s-.4-.8-.9-.9L12 3z" fill="#fff"/></svg>
+  </button>
+</form>
 
-    <form id="chatForm" autocomplete="off" novalidate style="display:flex;align-items:flex-end;gap:10px">
-      <div class="input-wrap" style="flex:1"><textarea id="userInput" placeholder="Ekris... oswa peze bouton vwa pou anrejistre" aria-label="Message"></textarea></div>
-      <button id="sendBtn" class="send" type="button" aria-label="Send">
-        <svg id="sendIcon" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3c-.6 0-1 .4-1 1v8h-8c-.6 0-1 .4-1 1 0 .3.1.6.3.8l12 10c.4.3 1 .3 1.4 0l8-6c.4-.3.6-.8.5-1.3s-.4-.8-.9-.9L12 3z" fill="#fff"/></svg>
-      </button>
-    </form>
-  </div>
-
-  <div id="modal" style="display:none;align-items:center;justify-content:center;">
+  </div>  <div id="modal" style="display:none;align-items:center;justify-content:center;">
     <div class="controls">
       <button id="downloadImgBtn"></button>
       <button id="closeModalBtn">✖</button>
     </div>
     <img id="modalImg" src="" alt="Preview"/>
-  </div>
-
-<script>
+  </div><script>
 (() => {
   const API = 'https://adamdh7.adamdh7.workers.dev/';
   const TF_KEY = 'tfid_v1';
@@ -105,6 +149,7 @@
   const modal = document.getElementById('modal');
   const modalImg = document.getElementById('modalImg');
   const closeModalBtn = document.getElementById('closeModalBtn');
+  const downloadImgBtn = document.getElementById('downloadImgBtn');
 
   let TFID = null, recording=false, recorder=null, recordedChunks=[], recordStart=0, recordTimer=null, maxRecordSec=60;
 
@@ -330,8 +375,8 @@
     return msg;
   }
 
-  function openModal(src){ modalImg.src = src; modal.style.display = 'flex'; }
-  function closeModal(){ modal.style.display = 'none'; modalImg.src = ''; }
+  function openModal(src){ modalImg.src = src; modal.style.display = 'flex'; document.body.style.overflow = 'hidden'; downloadImgBtn.onclick = ()=> { const a = document.createElement('a'); a.href = src; a.download = 'image.png'; document.body.appendChild(a); a.click(); a.remove(); }; }
+  function closeModal(){ modal.style.display = 'none'; modalImg.src = ''; document.body.style.overflow = ''; }
   closeModalBtn.addEventListener('click', closeModal);
   modal.addEventListener('click', (e)=>{ if(e.target === modal) closeModal(); });
 
@@ -533,6 +578,5 @@
   }
 
 })();
-</script>
-</body>
+</script></body>
 </html>
