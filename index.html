@@ -2,537 +2,89 @@
 <html lang="ht">
 <head>
   <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,viewport-fit=cover"/>
-  <title>Adam_D'H7</title>
-  <link rel="manifest" href="/manifest.json">
-  <meta name="theme-color" content="#000000" />
-  <link rel="apple-touch-icon" href="https://adamdh7ai.pages.dev/asset/1024.png">
-  <style>
-    :root{
-      --bg:#000; --panel:#000; --ai-bubble:#262626; --ai-text:#d0d0d0;
-      --user-blue:#0b3d91; --user-text:#e8f4ff; --muted:#7d7d7d;
-      --header-h:56px; --form-h:96px; --msg-gap:8px; --max-msg-w:76%;
-      --wa-code-bg: rgba(255,255,255,0.03); --wa-inline-bg: rgba(255,255,255,0.06);
-      --wa-quote-bar: rgba(255,255,255,0.12);
-    }
-    html,body{height:100%;margin:0;background:var(--bg);color:var(--ai-text);
-      font-family:Inter,Roboto,Arial,sans-serif;-webkit-text-size-adjust:100%}
-    header{height:var(--header-h);position:fixed;left:0;right:0;top:0;display:flex;
-      align-items:center;justify-content:center;z-index:60;background:var(--panel);
-      box-shadow:0 1px 0 rgba(255,255,255,0.02) inset}
-    .title{font-weight:800;color:var(--muted);font-size:18px}
-    .chat-box{position:fixed;top:var(--header-h);bottom:calc(var(--form-h));left:0;right:0;
-      padding:12px;overflow:auto;-webkit-overflow-scrolling:touch;box-sizing:border-box;
-      display:flex;flex-direction:column;gap:var(--msg-gap)}
-    .chat-box::-webkit-scrollbar{display:none}
-    .message{max-width:var(--max-msg-w);word-break:break-word;white-space:pre-wrap;padding:0;display:block}
-    .message.user{align-self:flex-end}
-    .message.bot{align-self:flex-start}
-    .bubble{padding:10px 14px;border-radius:14px;display:inline-block;font-size:15px;line-height:1.35;white-space:pre-wrap}
-    .bubble.user{background:var(--user-blue);color:var(--user-text)}
-    .bubble.bot{background:var(--ai-bubble);color:var(--ai-text);border:1px solid rgba(255,255,255,0.03)}
-    .meta{font-size:11px;color:var(--muted);margin-top:6px;text-align:right}
-    .message-images { display:flex; gap:8px; margin-top:6px; flex-wrap:wrap; align-items:flex-start; }
-    .message-images .img-small { width:96px; height:96px; border-radius:10px; object-fit:cover; cursor:pointer; border:1px solid rgba(255,255,255,0.04); }
-    .message-images .img-large { width:100%; max-width:920px; height:auto; border-radius:12px; object-fit:contain; cursor:pointer; box-shadow:0 8px 30px rgba(0,0,0,0.6); border:1px solid rgba(255,255,255,0.03); }
-    @media (max-width:920px){ .message-images .img-large { max-width:90vw; } .message{max-width:90%;} }
-    @media (max-width:520px){ :root{--max-msg-w:86%} .title{font-size:16px} .message-images .img-small{width:72px;height:72px} }
-    .bottom-zone{position:fixed;left:0;right:0;bottom:0;padding:10px 12px;box-sizing:border-box;
-      background:linear-gradient(180deg,transparent,rgba(0,0,0,0.02));display:flex;flex-direction:column;gap:8px;z-index:50}
-    .progress-row{display:flex;align-items:center;gap:8px;height:18px}
-    .progress-bar{flex:1;height:6px;background:rgba(255,255,255,0.06);border-radius:6px;overflow:hidden}
-    .progress-fill{height:100%;width:0%;background:linear-gradient(90deg,#ff6b6b,#ff3b3b);transition:width 120ms linear}
-    .progress-label{font-size:12px;color:var(--muted);min-width:44px;text-align:left}
-    form{display:flex;align-items:center;gap:10px;padding:8px 0}
-    .input-wrap{flex:1;display:flex;flex-direction:column;gap:6px}
-    textarea{flex:1;min-height:56px;max-height:160px;padding:12px;border-radius:14px;background:#050505;border:1px solid rgba(255,255,255,0.04);color:var(--ai-text);resize:none;outline:none;font-size:15px;box-sizing:border-box}
-    textarea::placeholder{color:rgba(255,255,255,0.16)}
-    .send{width:56px;height:56px;border-radius:50%;border:none;display:flex;align-items:center;justify-content:center;background:linear-gradient(180deg,var(--user-blue),#06306a);cursor:pointer;box-shadow:0 8px 20px rgba(11,61,145,0.12)}
-    .send svg{width:22px;height:22px;fill:#fff}
-    .send.recording{background:linear-gradient(180deg,#9b1b1b,#7a1515)}
-    .softbreak{word-break:break-word;white-space:pre-wrap}
-    .typing-dots { font-weight:800; letter-spacing:3px; display:inline-block; min-width:48px; text-align:left; }
-    .wa-paragraph{margin:6px 0;}
-    .wa-strong{font-weight:700; display:inline; cursor:pointer;}
-    .wa-inline{background:var(--wa-inline-bg); padding:2px 8px; border-radius:6px; font-family:ui-monospace,Menlo,Monaco,monospace; font-size:14px; border:1px solid rgba(255,255,255,0.02); display:inline-block; cursor:pointer;}
-    .wa-code-block{display:block; background:var(--wa-code-bg); padding:10px; border-radius:10px; font-family:ui-monospace,Menlo,Monaco,monospace; font-size:13px; line-height:1.4; color:var(--ai-text); margin:8px 0; border:1px solid rgba(255,255,255,0.03); white-space:pre-wrap; word-break:break-word; cursor:pointer;}
-    .wa-bullet { margin-right:8px; color:var(--muted); font-weight:600; display:inline-block; width:18px; text-align:center; }
-    .wa-underline{ text-decoration: underline; cursor: pointer; display:inline; }
-    .copied-flash{position:relative; display:inline-block;}
-    .copied-flash::after{ content:'✔'; position:absolute; right:-18px; top:0; font-size:12px; opacity:0; transform:translateY(-4px); transition:transform .18s ease, opacity .18s ease; color:#7CFC00; }
-    .copied-flash.copied::after{ opacity:1; transform:translateY(0); }
-  </style>
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>D'H7 | Tergene</title>
 </head>
 <body>
-  <header><div class="title">Adam_D'H7</div></header>
-  <main id="chatBox" class="chat-box" aria-live="polite"></main>
-
-  <div class="bottom-zone" aria-hidden="false">
-    <div id="progressRow" class="progress-row" style="display:none">
-      <div id="progressLabel" class="progress-label">0s</div>
-      <div class="progress-bar" aria-hidden="true"><div id="progressFill" class="progress-fill" style="width:0%"></div></div>
-      <div style="width:36px;text-align:right;color:var(--muted);font-size:12px" id="progressLimit">60s</div>
-    </div>
-
-    <form id="chatForm" autocomplete="off" novalidate style="display:flex;align-items:flex-end;gap:10px">
-      <div class="input-wrap" style="flex:1"><textarea id="userInput" placeholder="Ekris... oswa peze bouton vwa pou anrejistre" aria-label="Message"></textarea></div>
-      <button id="sendBtn" class="send" type="button" aria-label="Send">
-        <svg id="sendIcon" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3c-.6 0-1 .4-1 1v8h-8c-.6 0-1 .4-1 1 0 .3.1.6.3.8l12 10c.4.3 1 .3 1.4 0l8-6c.4-.3.6-.8.5-1.3s-.4-.8-.9-.9L12 3z" fill="#fff"/></svg>
-      </button>
-    </form>
-  </div>
-
-  <div id="modal" style="display:none;align-items:center;justify-content:center;">
-    <div class="controls">
-      <button id="downloadImgBtn"></button>
-      <button id="closeModalBtn">✖</button>
-    </div>
-    <img id="modalImg" src="" alt="Preview"/>
-  </div>
-
 <script>
-(() => {
-  const API = 'https://adamdh7.adamdh7.workers.dev/';
-  const TF_KEY = 'tfid_v1';
-  const MAX_TEXT = 10000;
-  const chatBox = document.getElementById('chatBox');
-  const userInput = document.getElementById('userInput');
-  const sendBtn = document.getElementById('sendBtn');
-  const sendIcon = document.getElementById('sendIcon');
-  const progressRow = document.getElementById('progressRow');
-  const progressFill = document.getElementById('progressFill');
-  const progressLabel = document.getElementById('progressLabel');
-  const modal = document.getElementById('modal');
-  const modalImg = document.getElementById('modalImg');
-  const closeModalBtn = document.getElementById('closeModalBtn');
+(async function(){
+  // detecte si yon string sanble ak HTML
+  const looksLikeHtml = s => typeof s === 'string' && /<\s*(?:!doctype|html|head|body|script|div|<\/)/i.test(s.trim());
 
-  let TFID = null, recording=false, recorder=null, recordedChunks=[], recordStart=0, recordTimer=null, maxRecordSec=60;
-
-  function escapeAttr(s){ return String(s === null || s === undefined ? '' : s).replace(/&/g,'&amp;').replace(/"/g,'&quot;').replace(/</g,'&lt;'); }
-
-  function collectPlain(node){
-    if(!node) return '';
-    if(node.nodeType === Node.TEXT_NODE) return node.nodeValue || '';
-    if(node.nodeType !== Node.ELEMENT_NODE) return '';
-    if(node.hasAttribute && node.hasAttribute('data-plain')) return node.getAttribute('data-plain') || '';
-    let out = '';
-    for(const ch of node.childNodes){
-      out += collectPlain(ch);
-    }
-    return out;
-  }
-
-  function buildInlineFragment(text){
-    const frag = document.createDocumentFragment();
-    if(!text) return frag;
-    let idx = 0;
-    const codeRe = /`([^`]+?)`/g;
-    let m;
-    while ((m = codeRe.exec(text)) !== null) {
-      if (m.index > idx) appendFormattedText(frag, text.slice(idx, m.index));
-      const codeInner = m[1];
-      const span = document.createElement('span');
-      span.className = 'wa-inline';
-      span.textContent = codeInner;
-      span.setAttribute('data-plain', codeInner);
-      frag.appendChild(span);
-      idx = codeRe.lastIndex;
-    }
-    if (idx < text.length) appendFormattedText(frag, text.slice(idx));
-    return frag;
-  }
-
-  function appendFormattedText(parent, text){
-    if(!text) return;
-    let pos = 0;
-    const strikeRe = /~~([\s\S]*?)~~/g;
-    let mm;
-    while ((mm = strikeRe.exec(text)) !== null) {
-      if (mm.index > pos) handleUnderlineAndBold(parent, text.slice(pos, mm.index));
-      const inner = mm[1];
-      const del = document.createElement('del');
-      del.textContent = inner;
-      del.setAttribute('data-plain', inner);
-      parent.appendChild(del);
-      pos = strikeRe.lastIndex;
-    }
-    if (pos < text.length) handleUnderlineAndBold(parent, text.slice(pos));
-  }
-
-  function handleUnderlineAndBold(parent, text){
-    if(!text) return;
-    let p = 0;
-    const underlineRe = /~([^~]+?)~/g;
-    let m2;
-    while ((m2 = underlineRe.exec(text)) !== null) {
-      if (m2.index > p) appendBoldAndPlain(parent, text.slice(p, m2.index));
-      const inner = m2[1];
-      const span = document.createElement('span');
-      span.className = 'wa-underline';
-      span.textContent = inner;
-      span.setAttribute('data-plain', inner);
-      parent.appendChild(span);
-      p = underlineRe.lastIndex;
-    }
-    if (p < text.length) appendBoldAndPlain(parent, text.slice(p));
-  }
-
-  function appendBoldAndPlain(parent, text){
-    if(!text) return;
-    const boldRe = /(\*{1,})([\s\S]*?)\1/g;
-    let pos = 0;
-    let mm;
-    while ((mm = boldRe.exec(text)) !== null) {
-      if (mm.index > pos) parent.appendChild(document.createTextNode(text.slice(pos, mm.index)));
-      const inner = mm[2];
-      const span = document.createElement('span');
-      span.className = 'wa-strong';
-      span.textContent = inner;
-      span.setAttribute('data-plain', inner);
-      parent.appendChild(span);
-      pos = boldRe.lastIndex;
-    }
-    if (pos < text.length) parent.appendChild(document.createTextNode(text.slice(pos)));
-  }
-
-  function buildParagraphFragment(para){
-    const frag = document.createDocumentFragment();
-    const lines = para.split('\n');
-    lines.forEach((line) => {
-      const bulletMatch = line.match(/^\s*([-*])\s+(.*)$/);
-      if (bulletMatch) {
-        const bulletWrap = document.createElement('div');
-        bulletWrap.className = 'wa-paragraph';
-        const bullet = document.createElement('span');
-        bullet.className = 'wa-bullet';
-        bullet.textContent = '•';
-        bulletWrap.appendChild(bullet);
-        const contentSpan = document.createElement('span');
-        const contentFrag = buildInlineFragment(bulletMatch[2]);
-        contentSpan.appendChild(contentFrag);
-        const plain = collectPlain(contentSpan);
-        contentSpan.setAttribute('data-plain', plain);
-        bulletWrap.setAttribute('data-plain', plain);
-        bulletWrap.appendChild(contentSpan);
-        frag.appendChild(bulletWrap);
-      } else {
-        const nodeContainer = document.createElement('div');
-        nodeContainer.className = 'wa-paragraph';
-        const inlineFrag = buildInlineFragment(line);
-        if(!inlineFrag.firstChild) nodeContainer.textContent = '';
-        nodeContainer.appendChild(inlineFrag);
-        nodeContainer.setAttribute('data-plain', collectPlain(nodeContainer));
-        frag.appendChild(nodeContainer);
+  // rechèch rekursif HTML andedan obj/tabl JSON
+  function searchHtml(node){
+    if(!node) return null;
+    if(typeof node === 'string') return looksLikeHtml(node) ? node : null;
+    if(Array.isArray(node)){
+      for(const e of node){
+        const r = searchHtml(e);
+        if(r) return r;
       }
-    });
-    return frag;
-  }
-
-  function formatToFragment(raw){
-    const frag = document.createDocumentFragment();
-    if (raw === null || raw === undefined) return frag;
-    let s = String(raw).replace(/\r\n/g,'\n').replace(/\r/g,'\n');
-    const codeBlocks = [];
-    s = s.replace(/```([\s\S]*?)```/g, (m, inner) => {
-      const idx = codeBlocks.length;
-      codeBlocks.push(inner);
-      return `@@CODEBLOCK_${idx}@@`;
-    });
-    const paragraphs = s.split(/\n{2,}/g);
-    paragraphs.forEach(par => {
-      const codeMatch = par.match(/^@@CODEBLOCK_(\d+)@@$/);
-      if (codeMatch) {
-        const i = Number(codeMatch[1]);
-        const inner = codeBlocks[i] || '';
-        const pre = document.createElement('pre');
-        pre.className = 'wa-code-block';
-        pre.textContent = inner;
-        pre.setAttribute('data-plain', inner);
-        frag.appendChild(pre);
-        return;
-      }
-      let cursor = 0;
-      const tokenRe = /(@@CODEBLOCK_(\d+)@@)/g;
-      let m;
-      const container = document.createDocumentFragment();
-      while ((m = tokenRe.exec(par)) !== null) {
-        if (m.index > cursor) container.appendChild(buildParagraphFragment(par.slice(cursor, m.index)));
-        const inner = codeBlocks[Number(m[2])] || '';
-        const pre = document.createElement('pre');
-        pre.className = 'wa-code-block';
-        pre.textContent = inner;
-        pre.setAttribute('data-plain', inner);
-        container.appendChild(pre);
-        cursor = tokenRe.lastIndex;
-      }
-      if (cursor < par.length) container.appendChild(buildParagraphFragment(par.slice(cursor)));
-      frag.appendChild(container);
-    });
-    return frag;
-  }
-
-  function renderMessage({id=null,who='bot', text=null, images=null, audioUrl=null, ts=Date.now(), persist=false}) {
-    const msg = document.createElement('div');
-    msg.className = 'message ' + (who === 'user' ? 'user' : 'bot');
-    msg.dataset.id = id || ('m_'+Date.now()+'_'+Math.floor(Math.random()*1000));
-    if (text) {
-      const b = document.createElement('div');
-      b.className = 'bubble ' + (who === 'user' ? 'user' : 'bot');
-      if (who === 'bot') {
-        const frag = formatToFragment(text);
-        b.appendChild(frag);
-      } else {
-        b.textContent = text;
-      }
-      msg.appendChild(b);
+      return null;
     }
-    if (Array.isArray(images) && images.length) {
-      const container = document.createElement('div');
-      container.className = 'message-images';
-      if (images.length === 1) {
-        const im = document.createElement('img');
-        im.className = 'img-large';
-        im.src = images[0];
-        im.alt = 'generated image';
-        im.loading = 'lazy';
-        im.addEventListener('click', ()=> openModal(images[0]));
-        container.appendChild(im);
-      } else {
-        images.forEach(src => {
-          const im = document.createElement('img');
-          im.className = 'img-small';
-          im.src = src;
-          im.alt = 'generated image';
-          im.loading = 'lazy';
-          im.addEventListener('click', ()=> openModal(src));
-          container.appendChild(im);
-        });
+    if(typeof node === 'object'){
+      const keys = ['index.html','index','html','content','body','source','data'];
+      for(const k of keys){
+        if(k in node && typeof node[k] === 'string' && looksLikeHtml(node[k])) return node[k];
       }
-      msg.appendChild(container);
-    }
-    if (audioUrl) {
-      const ap = document.createElement('div');
-      ap.className = 'audio-player';
-      ap.style.marginTop = '6px';
-      const a = document.createElement('audio');
-      a.controls = true;
-      a.src = audioUrl;
-      a.style.maxWidth = '220px';
-      ap.appendChild(a);
-      msg.appendChild(ap);
-    }
-    const meta = document.createElement('div');
-    meta.className = 'meta';
-    meta.textContent = new Date(ts).toLocaleTimeString();
-    msg.appendChild(meta);
-    chatBox.appendChild(msg);
-    setTimeout(()=> chatBox.scrollTop = chatBox.scrollHeight, 70);
-    return msg;
-  }
-
-  function openModal(src){ modalImg.src = src; modal.style.display = 'flex'; }
-  function closeModal(){ modal.style.display = 'none'; modalImg.src = ''; }
-  closeModalBtn.addEventListener('click', closeModal);
-  modal.addEventListener('click', (e)=>{ if(e.target === modal) closeModal(); });
-
-  document.addEventListener('click', (e) => {
-    const el = e.target.closest('[data-plain]');
-    if (!el) return;
-    const txt = el.getAttribute('data-plain') || '';
-    if (!txt) return;
-    if (navigator.clipboard && navigator.clipboard.writeText) {
-      navigator.clipboard.writeText(txt).then(() => {
-        el.classList.add('copied');
-        setTimeout(()=> el.classList.remove('copied'), 800);
-      }).catch(() => fallbackCopy(txt, el));
-    } else fallbackCopy(txt, el);
-  });
-
-  function fallbackCopy(txt, el){
-    const ta = document.createElement('textarea');
-    ta.value = txt;
-    document.body.appendChild(ta);
-    ta.select();
-    try { document.execCommand('copy'); el.classList.add('copied'); setTimeout(()=> el.classList.remove('copied'),800); } catch(e){ alert('Kopi echwe'); }
-    ta.remove();
-  }
-
-  function updateSendIcon(){ const txt = (userInput.value || '').trim(); if(recording){ sendBtn.classList.add('recording'); sendIcon.innerHTML = '<path d="M6 6h12v12H6z" fill="#fff"/>'; } else if(txt){ sendBtn.classList.remove('recording'); sendIcon.innerHTML = '<path d="M2 21L23 12L2 3L8 12L2 21Z" fill="#fff"/>'; } else { sendBtn.classList.remove('recording'); sendIcon.innerHTML = '<path d="M12 14a3 3 0 0 0 3-3V5a3 3 0 0 0-6 0v6a3 3 0 0 0 3 3zm5-3a5 5 0 0 1-10 0H5a7 7 0 0 0 14 0h-2z"/>'; } }
-  userInput.addEventListener('input', updateSendIcon);
-
-  function extractImageUrlsFromResponse(j){
-    if(!j) return [];
-    const out = [];
-    if(typeof j.imageUrl === 'string' && j.imageUrl.trim()) out.push(j.imageUrl.trim());
-    if(Array.isArray(j.imageUrl)) out.push(...j.imageUrl.map(x=>String(x).trim()));
-    if(Array.isArray(j.imageUrls)) out.push(...j.imageUrls.map(x=>String(x).trim()));
-    if(j.images && Array.isArray(j.images)) out.push(...j.images.map(x=>String(x).trim()));
-    if(j.output && Array.isArray(j.output)){
-      for(const o of j.output){
-        if(o && (o.url || o.image_url || o.imageUrl)) out.push(o.url || o.image_url || o.imageUrl);
-        if(typeof o === 'string' && o.startsWith('data:')) out.push(o);
+      for(const k in node){
+        if(!Object.prototype.hasOwnProperty.call(node,k)) continue;
+        const r = searchHtml(node[k]);
+        if(r) return r;
       }
     }
-    return Array.from(new Set(out.filter(Boolean)));
-  }
-
-  function fetchWithTimeout(url, options={}, timeout=420000){
-    const controller = new AbortController();
-    options.signal = controller.signal;
-    const timer = setTimeout(()=> controller.abort(), timeout);
-    return fetch(url, options).then(res => { clearTimeout(timer); return res; }).catch(err => { clearTimeout(timer); throw err; });
-  }
-
-  async function genTfCandidate(len){
-    let s=''; const chars='0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ'; const arr = new Uint32Array(len);
-    crypto.getRandomValues(arr); for(let i=0;i<len;i++){ s += chars[arr[i] % chars.length]; } return 'TF-' + s;
-  }
-
-  async function registerTfid(candidate){
-    try{
-      const res = await fetch(API + 'session/create', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ tfid: candidate }) });
-      const j = await res.json().catch(()=>null);
-      if(j && j.ok) return j.tfid || candidate;
-      return false;
-    }catch(e){ return false; }
-  }
-
-  function getStoredTfid(){ try{ return localStorage.getItem(TF_KEY); }catch(e){ return null; } }
-  function setStoredTfid(tf){ try{ localStorage.setItem(TF_KEY, tf); }catch(e){} }
-
-  async function getOrCreateTfid(){
-    let tf = getStoredTfid(); if(tf) return tf;
-    let len = 7;
-    for(let round=0;round<6;round++){
-      for(let i=0;i<6;i++){
-        const cand = await genTfCandidate(len);
-        const ok = await registerTfid(cand);
-        if(ok){ setStoredTfid(cand); return cand; }
-      }
-      len++;
-    }
-    const fb = 'TF-' + Date.now(); await registerTfid(fb); setStoredTfid(fb); return fb;
-  }
-
-  function renderSessionMessages(messages){
-    chatBox.innerHTML = '';
-    if(!Array.isArray(messages)) return;
-    for (const m of messages) {
-      const who = (m.from === 'user') ? 'user' : 'bot';
-      const ts = m.ts || Date.now();
-      if (m.type === 'text') {
-        if (m.text && m.text.length) renderMessage({ who, text: m.text, ts });
-      } else if (m.type === 'image') {
-        const imgs = [];
-        if (m.url && typeof m.url === 'string') imgs.push(m.url);
-        if (Array.isArray(m.url)) imgs.push(...m.url);
-        renderMessage({ who, text: null, images: imgs.length ? imgs : null, ts });
-      } else if (m.type === 'audio') {
-        const url = (m.url && typeof m.url === 'string') ? m.url : null;
-        renderMessage({ who, text: m.transcription || null, audioUrl: url, ts });
-      } else {
-        const txt = m.text || m.transcription || JSON.stringify(m).slice(0,2000);
-        renderMessage({ who, text: txt, ts });
-      }
-    }
-  }
-
-  async function fetchSessionAndRender(tfid) {
-    if(!tfid) return;
-    try {
-      const res = await fetchWithTimeout(API + 'session?tfid=' + encodeURIComponent(tfid), {}, 15000);
-      const j = await res.json().catch(()=>null);
-      if (j && j.ok && j.session && Array.isArray(j.session.messages)) {
-        renderSessionMessages(j.session.messages);
-        return j.session;
-      }
-    } catch(e){}
     return null;
   }
 
-  async function callChat(text){
-    if(!TFID) TFID = await getOrCreateTfid();
-    if(!text || text.length === 0) return;
-    if(text.length > MAX_TEXT){ renderMessage({who:'bot', text:'Tèks twò long. Limit ' + MAX_TEXT + ' karaktè.'}); return; }
-    renderMessage({ who:'user', text, ts: Date.now() });
-    const typing = createTypingController();
-    try {
-      const res = await fetchWithTimeout(API, { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ action:'chat', text, tfid: TFID }) }, 420000);
-      let j = null;
-      try { j = await res.clone().json(); } catch(e){ j = null; }
-      if (j && j.session && Array.isArray(j.session.messages)) {
-        typing.stop();
-        renderSessionMessages(j.session.messages);
-        return;
+  function escapeHtml(str){ return String(str).replace(/[&<>"']/g, s=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[s])); }
+
+  try {
+    const res = await fetch('./3.json', { cache: 'no-store' });
+    const ct = (res.headers.get('content-type') || '').toLowerCase();
+    const text = await res.text();
+
+    // si sèvè a retounen non-ok (eg. 404) — si li HTML, ekri li dirèkteman; sinon montre erè kout
+    if(!res.ok){
+      if(looksLikeHtml(text)){
+        document.open(); document.write(text); document.close(); return;
       }
-      if (j && (j.text || j.post_text || j.imageUrl)) {
-        typing.stop();
-        if (j.imageUrl) {
-          renderMessage({ who:'bot', text: j.post_text || null, images: Array.isArray(j.imageUrl) ? j.imageUrl : [j.imageUrl], ts: Date.now() });
-        } else {
-          renderMessage({ who:'bot', text: j.text || j.post_text || null, ts: Date.now() });
-        }
-        await fetchSessionAndRender(TFID);
-        return;
-      }
-      try {
-        const txt = await res.clone().text();
-        if (txt && txt.trim()) {
-          typing.stop();
-          renderMessage({ who:'bot', text: txt.trim(), ts: Date.now() });
-          await fetchSessionAndRender(TFID);
-          return;
-        }
-      } catch(e){}
-      typing.stop();
-      renderMessage({ who:'bot', text:'(Pa jwenn repons)', ts: Date.now() });
-      await fetchSessionAndRender(TFID);
-    } catch (err) {
-      typing.stop();
-      renderMessage({ who:'bot', text:'(Pa jwenn repons)', ts: Date.now() });
-      setTimeout(()=> fetchSessionAndRender(TFID), 800);
+      document.open();
+      document.write('<!doctype html><meta charset="utf-8"><title>Erreur HTTP</title><pre style="white-space:pre-wrap;padding:16px;font-family:monospace">HTTP ' + res.status + ' ' + (res.statusText || '') + '\\n\\n' + escapeHtml(String(text).slice(0,200)) + '</pre>');
+      document.close();
+      return;
     }
+
+    // si content-type endike HTML oswa tèks sanble HTML -> ekri li
+    if(ct.includes('text/html') || looksLikeHtml(text)){
+      document.open(); document.write(text); document.close(); return;
+    }
+
+    // otreman, eseye JSON.parse — si echwe, konsidere kòm tèks (pa HTML)
+    let parsed;
+    try { parsed = JSON.parse(text); } catch(e) { parsed = text; }
+
+    // si parsing retounen string HTML
+    if(typeof parsed === 'string' && looksLikeHtml(parsed)){
+      document.open(); document.write(parsed); document.close(); return;
+    }
+
+    // chèche HTML andedan JSON la
+    const html = searchHtml(parsed);
+    if(html){
+      document.open(); document.write(html); document.close(); return;
+    }
+
+    // pa jwenn anyen: montre mesaj erè
+    document.open();
+    document.write('<!doctype html><meta charset="utf-8"><title>Erreur</title><pre style="white-space:pre-wrap;padding:16px;font-family:monospace">Aucun index.html trouvé dans 3.json.</pre>');
+    document.close();
+
+  } catch (err) {
+    document.open();
+    document.write('<!doctype html><meta charset="utf-8"><title>Erreur</title><pre style="white-space:pre-wrap;padding:16px;font-family:monospace">Erreur: ' + escapeHtml(String(err && err.message ? err.message : err)) + '</pre>');
+    document.close();
   }
-
-  function createTypingController(){
-    const id = 'typing_' + Date.now() + '_' + Math.floor(Math.random()*1000);
-    const el = document.createElement('div'); el.className = 'message bot'; el.dataset.id = id;
-    const b = document.createElement('div'); b.className = 'bubble bot';
-    const dotsSpan = document.createElement('span'); dotsSpan.className = 'typing-dots'; dotsSpan.textContent = '●';
-    b.appendChild(dotsSpan); el.appendChild(b);
-    const meta = document.createElement('div'); meta.className='meta'; meta.textContent = '';
-    el.appendChild(meta); chatBox.appendChild(el); chatBox.scrollTop = chatBox.scrollHeight;
-    let state = 1; let running = true;
-    const interval = setInterval(()=>{ if(!running) return; state = state >= 3 ? 1 : state + 1; dotsSpan.textContent = '●'.repeat(state); }, 500);
-    return { el, stop: () => { running = false; clearInterval(interval); try{ if(el && el.parentNode) el.parentNode.removeChild(el); }catch(e){} } };
-  }
-
-  async function startRecording(){ if(userInput.value.trim()) return; if(!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) { alert('Mikwofòn pa disponib sou navigatè sa a.'); return; } try{ const stream = await navigator.mediaDevices.getUserMedia({audio:true}); recordedChunks = []; recorder = new MediaRecorder(stream); recorder.ondataavailable = e => { if(e.data && e.data.size) recordedChunks.push(e.data); }; recorder.onstop = async () => { const blob = new Blob(recordedChunks, {type:'audio/webm'}); const url = URL.createObjectURL(blob); renderMessage({who:'user', text:null, images:null, audioUrl:url, ts:Date.now()}); await sendBlobForTranscription(blob); stream.getTracks().forEach(t=>t.stop()); }; recorder.start(); recording = true; recordStart = Date.now(); progressRow.style.display = 'flex'; progressFill.style.width = '0%'; progressLabel.textContent = '0s'; startRecordTimer(); updateSendIcon(); }catch(err){ alert('Pa jwenn aksè mikwofòn: ' + (err && err.message ? err.message : err)); } }
-  function stopRecording(){ if(recorder && recorder.state !== 'inactive') recorder.stop(); recording = false; stopRecordTimer(); progressRow.style.display = 'none'; updateSendIcon(); }
-  function startRecordTimer(){ recordTimer = setInterval(()=>{ const s = Math.floor((Date.now() - recordStart)/1000); progressLabel.textContent = s + 's'; const pct = Math.min(100, (s / maxRecordSec) * 100); progressFill.style.width = pct + '%'; if(s >= maxRecordSec) stopRecording(); }, 200); }
-  function stopRecordTimer(){ clearInterval(recordTimer); progressFill.style.width = '0%'; progressLabel.textContent = '0s'; }
-
-  async function sendBlobForTranscription(blob){ if(!TFID) TFID = await getOrCreateTfid(); try{ const fd = new FormData(); fd.append('file', blob, 'voice.webm'); fd.append('action', 'transcribe'); fd.append('tfid', TFID); const res = await fetchWithTimeout(API, {method:'POST', body: fd}, 420000); let j = null; try{ j = await res.clone().json(); }catch(e){ j = null; } if(!j){ try{ const txt = await res.clone().text(); if(txt && txt.trim()) j = { text: txt.trim() }; }catch(e){} } const text = (j && j.text) ? j.text : (j && j.aiRaw && j.aiRaw.text) ? j.aiRaw.text : null; if(text){ renderMessage({who:'user', text, images:null, audioUrl:null, ts:Date.now()}); await callChat(text); } else { renderMessage({who:'bot', text:'Transcription pa jwenn tèks.', images:null, audioUrl:null, ts:Date.now()}); } }catch(e){ if(e && e.name === 'AbortError'){ renderMessage({who:'bot', text:'(Pa jwenn repons)', images:null, audioUrl:null, ts:Date.now()}); } else { renderMessage({who:'bot', text:'Erè pandan transcription: ' + (e && e.message ? e.message : e), images:null, audioUrl:null, ts:Date.now()}); } } }
-
-  sendBtn.addEventListener('click', async ()=>{ const text = (userInput.value || '').trim(); if(recording){ stopRecording(); return; } if(text){ userInput.value = ''; updateSendIcon(); await callChat(text); } else { await startRecording(); } });
-  userInput.addEventListener('keydown', (e)=>{ if(e.key === 'Enter' && !e.shiftKey && (e.ctrlKey || e.metaKey)){ e.preventDefault(); sendBtn.click(); } });
-
-  (async ()=>{ TFID = await getOrCreateTfid(); await fetchSessionAndRender(TFID); updateSendIcon(); })();
-
-  if(window.visualViewport){
-    const onView = () => { const vv = window.visualViewport; const header = document.querySelector('header'); header.style.top = (vv.offsetTop || 0) + 'px'; const kbHeight = window.innerHeight - vv.height - (vv.offsetTop || 0); const bottomZone = document.querySelector('.bottom-zone'); const formH = bottomZone.offsetHeight || 140; const bottomPad = Math.max(formH, formH + kbHeight); document.querySelector('.chat-box').style.bottom = bottomPad + 'px'; if(document.activeElement === userInput) setTimeout(()=> chatBox.scrollTop = chatBox.scrollHeight, 100); };
-    window.visualViewport.addEventListener('resize', onView);
-    window.visualViewport.addEventListener('scroll', onView);
-    window.addEventListener('resize', onView);
-  }
-
-  window.toggleSidebar = ()=> { };
-
-  if ('serviceWorker' in navigator) {
-    navigator.serviceWorker.register('/sw.js', { scope: '/' }).then(()=>{}).catch(()=>{});
-  }
-
 })();
 </script>
 </body>
-    </html>
+</html>
