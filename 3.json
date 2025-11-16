@@ -4,6 +4,8 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,viewport-fit=cover"/>
   <title>Adam_D'H7</title>
+
+  <!-- PWA manifest & theme -->
   <link rel="manifest" href="/manifest.json">
   <meta name="theme-color" content="#000000" />
   <link rel="apple-touch-icon" href="https://adamdh7ai.pages.dev/asset/1024.png">
@@ -21,6 +23,7 @@
       --form-h:96px;
       --msg-gap:8px;
       --max-msg-w:76%;
+
       --wa-quote-bg: rgba(255,255,255,0.03);
       --wa-quote-bar: rgba(255,255,255,0.12);
       --wa-code-bg: rgba(255,255,255,0.03);
@@ -68,8 +71,9 @@
     #modalImg{max-width:92%;max-height:86%;border-radius:8px;object-fit:contain}
     .typing-dots { font-weight:800; letter-spacing:3px; display:inline-block; min-width:48px; text-align:left; }
 
-    /* ----- WhatsApp-like in-card text styles ----- */
-    .wa-strong{font-weight:700; display:inline-block; margin:6px 0; cursor:pointer}
+    /* WhatsApp-like formatting */
+    .wa-paragraph{margin:6px 0;display:block}
+    .wa-strong{font-weight:700; display:inline; cursor:pointer}
     .wa-quote{
       display:flex;
       gap:10px;
@@ -118,33 +122,20 @@
       word-break:break-word;
       cursor:pointer;
     }
-    .wa-paragraph{margin:6px 0;}
-    .wa-bullet{
-      display:flex;
-      gap:10px;
-      align-items:flex-start;
-      margin:6px 0;
-      cursor:pointer;
+    .wa-bullet { margin-right:8px; color:var(--muted); font-weight:600; display:inline-block; width:18px; text-align:center; }
+    .copied-flash{position:relative; display:inline-block;}
+    .copied-flash::after{
+      content:'✔';
+      position:absolute;
+      right:-18px;
+      top:0;
+      font-size:12px;
+      opacity:0;
+      transform:translateY(-4px);
+      transition:transform .18s ease, opacity .18s ease;
+      color:#7CFC00;
     }
-    .wa-bullet .bullet{
-      flex:0 0 18px;
-      font-size:16px;
-      line-height:1.45;
-      color:var(--muted);
-    }
-    .wa-bullet .b-content{
-      flex:1;
-      line-height:1.45;
-      color:var(--ai-text);
-      white-space:pre-wrap;
-    }
-
-    /* underline like WhatsApp */
-    .wa-underline { text-decoration: underline; display:inline-block; cursor:pointer; }
-
-    /* copy feedback */
-    [data-plain].copied { opacity: 0.85; transform: translateY(-2px); transition: .18s ease; }
-    [data-plain].copied::after { content: ' ✔'; color: #7CFC00; font-size: 12px; margin-left: 6px; }
+    .copied-flash.copied::after{ opacity:1; transform:translateY(0); }
   </style>
 </head>
 <body>
@@ -214,81 +205,88 @@
   function getStoredTfid(){ try{ return localStorage.getItem(TF_KEY); }catch(e){ return null; } }
   function setStoredTfid(tf){ try{ localStorage.setItem(TF_KEY, tf); }catch(e){} }
 
-  /* Improved formatMessage:
-     - extract code blocks, quotes, bullets first
-     - preserve markers in display but store cleaned inner text in data-plain (trimmed)
-     - restore with no leading/trailing extra spaces
+  /*
+    formatMessage:
+    - Remove markers visually for bold/inline code/codeblock/quotes/bullets (WhatsApp-like)
+    - Keep original inner text in data-plain for copy-on-click
   */
   function formatMessage(raw) {
     if (raw === null || raw === undefined) return '';
     let s = String(raw).replace(/\r\n/g,'\n').replace(/\r/g,'\n');
 
-    // fenced code blocks
+    // 1) Extract code blocks ```...``` first
     const codeBlocks = [];
     s = s.replace(/```([\s\S]*?)```/g, (m, inner) => {
-      const idx = codeBlocks.length; codeBlocks.push(inner);
+      const idx = codeBlocks.length;
+      codeBlocks.push(inner);
       return `@@CODEBLOCK_${idx}@@`;
     });
 
-    // blockquotes consecutive
+    // 2) Extract block quotes (consecutive lines starting with >)
     const quotes = [];
     s = s.replace(/(^|\n)((?:>\s?.*(?:\n|$))+)/g, (m) => {
+      // arguments[2] is the block of lines
       const block = arguments[2];
-      const idx = quotes.length; quotes.push(block);
+      const idx = quotes.length;
+      quotes.push(block);
       return `\n@@QUOTE_${idx}@@\n`;
     });
 
-    // bullets: line start '*' or '-' followed by space
-    const bullets = [];
-    s = s.replace(/(^|\n)\s*([*-])\s+(.*?)(?=\n|$)/g, (m, pre, marker, content) => {
-      const idx = bullets.length; bullets.push(content);
-      return `${pre}@@BULLET_${idx}@@`;
-    });
-
-    // inline code (single backticks or groups)
+    // 3) Process inline code `inline` (one or more backticks)
     s = s.replace(/(`+)([\s\S]*?)\1/g, (m, ticks, inner) => {
-      return `<span class="wa-inline" data-plain="${escapeAttr(inner.trim())}">${escapeHtml(inner)}</span>`;
+      const plain = inner;
+      const disp = escapeHtml(inner);
+      return `<span class="wa-inline" data-plain="${escapeAttr(plain)}">${disp}</span>`;
     });
 
-    // underline using single ~...~
-    s = s.replace(/~{1}([\s\S]*?)~{1}/g, (m, inner) => {
-      return `<span class="wa-underline" data-plain="${escapeAttr(inner.trim())}">${escapeHtml(inner)}</span>`;
+    // 4) Bold with * (any number of * at start/end) -> remove markers, show bold text
+    // Use non-greedy inner capture
+    s = s.replace(/(^|\s)\*{1,}([\s\S]*?)\*{1,}(\s|$)/g, (m, pre, inner, post) => {
+      // keep surrounding whitespace but display only inner as bold
+      const plain = inner;
+      return `${pre}<span class="wa-strong" data-plain="${escapeAttr(plain)}">${escapeHtml(inner)}</span>${post}`;
     });
 
-    // bold with matching asterisks; keep markers visible but store inner trimmed
-    s = s.replace(/(\*{1,})(?!\s)([\s\S]*?)(?<!\s)\1/g, (m, markers, inner) => {
-      return `<span class="wa-strong" data-plain="${escapeAttr(inner.trim())}">${escapeHtml(markers)}${escapeHtml(inner)}${escapeHtml(markers)}</span>`;
+    // 5) Strikethrough ~~...~~ => display inner with <del>
+    s = s.replace(/~{2,}([\s\S]*?)~{2,}/g, (m, inner) => {
+      const plain = inner;
+      return `<del data-plain="${escapeAttr(plain)}">${escapeHtml(inner)}</del>`;
     });
 
-    // restore bullets (trim leading whitespace from inner)
-    s = s.replace(/@@BULLET_(\d+)@@/g, (m, idx) => {
-      const i = Number(idx);
-      const raw = bullets[i] || '';
-      const inner = raw.replace(/^\s+/, '').replace(/\s+$/,'');
-      const disp = escapeHtml(inner).replace(/\n/g,'<br>');
-      // data-plain = inner trimmed (no markers)
-      return `<div class="wa-bullet" data-plain="${escapeAttr(inner)}"><div class="bullet">•</div><div class="b-content">${disp}</div></div>`;
-    });
-
-    // restore quotes
+    // 6) Now restore quotes placeholders as .wa-quote (remove '>' markers visually)
     s = s.replace(/@@QUOTE_(\d+)@@/g, (m, idx) => {
       const i = Number(idx);
       const rawBlock = quotes[i] || '';
+      // rawBlock contains lines like "> line1\n> line2\n"
       const plain = rawBlock.split('\n').map(l => l.replace(/^\s*>\s?/, '')).filter(Boolean).join('\n');
-      const disp = escapeHtml(rawBlock).replace(/\n/g,'<br>');
-      return `<div class="wa-quote" data-plain="${escapeAttr(plain.trim())}"><div class="bar"></div><div class="content">${disp}</div></div>`;
+      const disp = rawBlock.split('\n').map(l => l.replace(/^\s*>\s?/, '')).filter(Boolean).map(escapeHtml).join('<br>');
+      return `<div class="wa-quote" data-plain="${escapeAttr(plain)}"><div class="bar"></div><div class="content">${disp}</div></div>`;
     });
 
-    // restore code blocks
+    // 7) Restore code blocks
     s = s.replace(/@@CODEBLOCK_(\d+)@@/g, (m, idx) => {
       const i = Number(idx);
       const inner = codeBlocks[i] || '';
-      const disp = escapeHtml(inner);
-      return `<pre class="wa-code-block" data-plain="${escapeAttr(inner.replace(/^\n/,'').replace(/\n$/,''))}">${disp}</pre>`;
+      return `<pre class="wa-code-block" data-plain="${escapeAttr(inner)}">${escapeHtml(inner)}</pre>`;
     });
 
-    // paragraphs -> split double-newline; single newline -> <br>
-    const paragraphs = s.split(/\n{2,}/g).map(p => p.replace(/\n/g,'<br>'));
+    // 8) Convert lines starting with - or * to bullets (only when used as list marker)
+    // We'll split into paragraphs by double-newline, then process each line
+    const paragraphs = s.split(/\n{2,}/g).map(para => {
+      // process each line separately
+      const lines = para.split('\n').map(line => {
+        const m = line.match(/^\s*([-*])\s+(.*)$/);
+        if (m) {
+          const inner = m[2].trim();
+          return `<div class="wa-paragraph"><span class="wa-bullet">•</span><span data-plain="${escapeAttr(inner)}">${escapeHtml(inner)}</span></div>`;
+        } else {
+          return escapeHtml(line);
+        }
+      });
+      return lines.join('<br>');
+    });
+
+    // 9) Wrap resulting paragraphs
     return paragraphs.map(p => `<div class="wa-paragraph">${p}</div>`).join('');
   }
 
@@ -353,29 +351,38 @@
   closeModalBtn.addEventListener('click', closeModal);
   modal.addEventListener('click', (e)=>{ if(e.target === modal) closeModal(); });
 
-  // Copy-on-click: read data-plain, trim, copy
+  // Click-to-copy: copy value of data-plain when user clicks formatted element
   document.addEventListener('click', (e) => {
     const el = e.target.closest('[data-plain]');
     if (!el) return;
-    let txt = el.getAttribute('data-plain') || '';
-    txt = String(txt).replace(/\r/g,'').replace(/^\s+/, '').replace(/\s+$/, '');
+    const txt = el.getAttribute('data-plain') || '';
     if (!txt) return;
-    const doCopy = () => {
-      if (navigator.clipboard && navigator.clipboard.writeText) return navigator.clipboard.writeText(txt);
-      // fallback:
-      const ta = document.createElement('textarea'); ta.value = txt; document.body.appendChild(ta); ta.select();
-      try { document.execCommand('copy'); } catch(e){ /* ignore */ } ta.remove(); return Promise.resolve();
-    };
-    doCopy().then(()=> {
-      el.classList.add('copied');
-      setTimeout(()=> el.classList.remove('copied'), 800);
-    }).catch(()=> { alert('Kopi echwe'); });
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      navigator.clipboard.writeText(txt).then(() => {
+        el.classList.add('copied');
+        setTimeout(()=> el.classList.remove('copied'), 800);
+      }).catch(() => {
+        const ta = document.createElement('textarea');
+        ta.value = txt;
+        document.body.appendChild(ta);
+        ta.select();
+        try { document.execCommand('copy'); el.classList.add('copied'); setTimeout(()=> el.classList.remove('copied'), 800); } catch(e){ alert('Kopi echwe'); }
+        ta.remove();
+      });
+    } else {
+      const ta = document.createElement('textarea');
+      ta.value = txt;
+      document.body.appendChild(ta);
+      ta.select();
+      try { document.execCommand('copy'); el.classList.add('copied'); setTimeout(()=> el.classList.remove('copied'), 800); } catch(e){ alert('Kopi echwe'); }
+      ta.remove();
+    }
   });
 
   function updateSendIcon(){ const txt = (userInput.value || '').trim(); if(recording){ sendBtn.classList.add('recording'); sendIcon.innerHTML = '<path d="M6 6h12v12H6z" fill="#fff"/>'; } else if(txt){ sendBtn.classList.remove('recording'); sendIcon.innerHTML = '<path d="M2 21L23 12L2 3L8 12L2 21Z" fill="#fff"/>'; } else { sendBtn.classList.remove('recording'); sendIcon.innerHTML = '<path d="M12 14a3 3 0 0 0 3-3V5a3 3 0 0 0-6 0v6a3 3 0 0 0 3 3zm5-3a5 5 0 0 1-10 0H5a7 7 0 0 0 14 0h-2z"/>'; } }
   userInput.addEventListener('input', updateSendIcon);
 
-  /* --- session / network helpers (unchanged) --- */
+  /* --- network/session helpers (unchanged) --- */
   function extractImageUrlsFromResponse(j){
     if(!j) return [];
     const out = [];
@@ -574,9 +581,11 @@
 
   window.toggleSidebar = ()=> { };
 
+  // Register service worker (attempt; fail silently)
   if ('serviceWorker' in navigator) {
     navigator.serviceWorker.register('/sw.js', { scope: '/' }).then(reg => {
-    }).catch(()=>{});
+      // registration ok
+    }).catch(()=>{ /* ignore registration errors */ });
   }
 
 })();
