@@ -20,12 +20,6 @@
       "purpose": "any"
     },
     {
-      "src": "https://adamdh7ai.pages.dev/asset/1024.jpg",
-      "sizes": "1024x1024",
-      "type": "image/jpeg",
-      "purpose": "any"
-    },
-    {
       "src": "https://adamdh7ai.pages.dev/asset/512.png",
       "sizes": "512x512",
       "type": "image/png",
