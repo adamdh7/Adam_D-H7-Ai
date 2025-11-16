@@ -1,5 +1,5 @@
 // sw.js
-const CACHE_VERSION = 'v2-adamdh7'; // bump version when changing
+const CACHE_VERSION = 'v3-adamdh7'; // bump version when changing
 const PRECACHE_URLS = [
   '/',
   '/index.html',
