@@ -1,9 +1,3 @@
-/* sw.js - TF-Stream (corrigé)
-   - Cache shell, thumbs (images) ak json
-   - NE PAS cache vidéo (mp4, m3u8, webm, mpd, mkv)
-   - Lors de fetch: laisser le navigateur gérer les requêtes vidéo
-*/
-
 const CACHE_NAME = 'adamdh7ai-shell-v1';
 const IMAGE_CACHE = 'adamdh7ai-thumbs-v1';
 const JSON_CACHE = 'adamdh7ai-json-v1';
