@@ -7,7 +7,7 @@
   <title>Adam_D'H7</title>
   <link rel="manifest" href="/manifest.json?v=7">
   <meta name="theme-color" content="#000000" />
-  <link rel="apple-touch-icon" href="https://adamdh7ai.pages.dev/asset/1024.png">
+  <link rel="apple-touch-icon" href="https://adamdh7ai.pages.dev/asset/512.png">
   <style>
     :root{
       --bg:#000; --panel:#000; --ai-bubble:#262626; --ai-text:#d0d0d0;
