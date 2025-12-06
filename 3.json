@@ -136,7 +136,7 @@
     <img id="modalImg" src="" alt="Preview"/>
   </div><script>
 (() => {
-  const API = 'https://adamdh7.adamdh7.workers.dev/';
+  const API = 'https://adamdh7-2.tergenedhaiti.workers.dev/';
   const TF_KEY = 'tfid_v1';
   const MAX_TEXT = 10000;
   const chatBox = document.getElementById('chatBox');
