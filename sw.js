@@ -1,6 +1,6 @@
-const CACHE_NAME = 'adamdh7ai-shell-v1';
-const IMAGE_CACHE = 'adamdh7ai-thumbs-v1';
-const JSON_CACHE = 'adamdh7ai-json-v1';
+const CACHE_NAME = 'adamdh7ai-shell-v17';
+const IMAGE_CACHE = 'adamdh7ai-thumbs-v17';
+const JSON_CACHE = 'adamdh7ai-json-v17';
 const OFFLINE_URL = '/offline.html';
 const PLACEHOLDER = '/asset/192.png';
 const PRECACHE_URLS = ['/', '/index.html', '/manifest.json', OFFLINE_URL, PLACEHOLDER];
