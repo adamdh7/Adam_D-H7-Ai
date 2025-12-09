@@ -138,7 +138,7 @@
 (() => {
   const API = 'https://adamdh7-2.tergenedhaiti.workers.dev/';
   const TF_KEY = 'tfid_v1';
-  const MAX_TEXT = 10000;
+  const MAX_TEXT = Infinity;
   const chatBox = document.getElementById('chatBox');
   const userInput = document.getElementById('userInput');
   const sendBtn = document.getElementById('sendBtn');
