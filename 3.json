@@ -578,5 +578,210 @@
   }
 
 })();
-</script></body>
+</script><!-- PWA install bar (paste in <body>) -->
+<style>
+/* --- CSS pou bar la --- */
+#pwa-install-bar {
+  position: fixed;
+  left: 16px;
+  right: 16px;
+  bottom: 18px;
+  display: none; /* shown by JS */
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 14px;
+  border-radius: 12px;
+  box-shadow: 0 8px 22px rgba(0,0,0,0.18);
+  background: linear-gradient(180deg, #ffffff, #f7f9fc);
+  z-index: 9999;
+  backdrop-filter: blur(6px);
+  font-family: Inter, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial;
+}
+
+/* bouton prensipal */
+#pwa-install-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 12px;
+  border: none;
+  background: linear-gradient(90deg,#0066ff,#2ab0ff);
+  color: white;
+  padding: 8px 12px;
+  border-radius: 10px;
+  font-weight: 600;
+  font-size: 15px;
+  cursor: pointer;
+  box-shadow: 0 6px 14px rgba(10, 90, 255, 0.18);
+}
+
+/* icon 3 egal (3 lines) */
+.three-equals {
+  width: 20px;
+  height: 16px;
+  display:flex;
+  flex-direction: column;
+  justify-content: space-between;
+  align-items: center;
+}
+.three-equals span {
+  display:block;
+  width: 18px;
+  height: 2px;
+  background: white;
+  border-radius: 2px;
+}
+
+/* label tèks */
+.pwa-label { font-size: 14px; }
+
+/* close small button */
+#pwa-close {
+  background: transparent;
+  border: none;
+  font-size: 20px;
+  line-height: 1;
+  color: #334155;
+  cursor: pointer;
+  padding: 6px;
+  border-radius: 8px;
+}
+#pwa-close:hover { background: rgba(0,0,0,0.04); }
+
+/* IOS instruction modal (fallback) */
+#pwa-ios-modal {
+  display: none;
+  position: fixed;
+  left: 16px;
+  right: 16px;
+  bottom: 90px;
+  padding: 12px 14px;
+  border-radius: 12px;
+  background: #fffefc;
+  box-shadow: 0 10px 30px rgba(0,0,0,0.2);
+  z-index: 10000;
+  font-size: 14px;
+}
+#pwa-ios-modal .ok { margin-top:8px; display:inline-block; padding:6px 10px; border-radius:8px; background:#efefef; cursor:pointer; }
+</style>
+
+<div id="pwa-install-bar" role="region" aria-label="Installer l'application">
+  <button id="pwa-install-btn" aria-label="Installer l'application">
+    <span class="three-equals" aria-hidden="true">
+      <span></span><span></span><span></span>
+    </span>
+    <span class="pwa-label">Installer l’app</span>
+  </button>
+  <button id="pwa-close" aria-label="Fermer la barre">✕</button>
+</div>
+
+<!-- iOS fallback instructions -->
+<div id="pwa-ios-modal" role="dialog" aria-hidden="true">
+  <div><strong>Ajouter à l'écran d'accueil</strong></div>
+  <div style="margin-top:6px">
+    Sur iPhone/iPad : appuyez sur le bouton <em>Partager</em> (en bas du navigateur) puis <em>Ajouter à l’écran d’accueil</em>.
+  </div>
+  <div class="ok" id="pwa-ios-ok">Compris</div>
+</div>
+
+<script>
+/* --- JS: beforeinstallprompt handler + UI logic --- */
+(function(){
+  const bar = document.getElementById('pwa-install-bar');
+  const btn = document.getElementById('pwa-install-btn');
+  const closeBtn = document.getElementById('pwa-close');
+  const iosModal = document.getElementById('pwa-ios-modal');
+  const iosOk = document.getElementById('pwa-ios-ok');
+
+  let deferredPrompt = null;
+  const STORAGE_KEY = 'pwa-install-dismissed';
+
+  function showBar() {
+    if (localStorage.getItem(STORAGE_KEY) === '1') return;
+    bar.style.display = 'flex';
+    bar.setAttribute('aria-hidden','false');
+  }
+  function hideBar() {
+    bar.style.display = 'none';
+    bar.setAttribute('aria-hidden','true');
+  }
+
+  // when browser fires beforeinstallprompt, capture it
+  window.addEventListener('beforeinstallprompt', (e) => {
+    e.preventDefault(); // stop auto prompt
+    deferredPrompt = e;
+    // small debounce: show only if not installed
+    if (!window.matchMedia('(display-mode: standalone)').matches) {
+      showBar();
+    }
+  });
+
+  // user clicks install button
+  btn.addEventListener('click', async () => {
+    // If we have deferredPrompt, show native prompt (Chrome/Edge/Android)
+    if (deferredPrompt) {
+      deferredPrompt.prompt();
+      const { outcome } = await deferredPrompt.userChoice;
+      // outcome: "accepted" or "dismissed"
+      if (outcome === 'accepted') {
+        // user accepted install
+        hideBar();
+        localStorage.setItem(STORAGE_KEY,'1');
+      } else {
+        // dismissed: keep or hide based on your choice
+        // we'll hide temporarily
+        hideBar();
+        setTimeout(()=>localStorage.removeItem(STORAGE_KEY), 1000 * 60 * 60 * 6); // allow show again in 6h
+      }
+      deferredPrompt = null;
+    } else {
+      // No beforeinstallprompt: likely iOS or already installed
+      // show instructions modal for iOS (Share -> Add to Home Screen)
+      iosModal.style.display = 'block';
+      iosModal.setAttribute('aria-hidden','false');
+    }
+  });
+
+  closeBtn.addEventListener('click', () => {
+    hideBar();
+    localStorage.setItem(STORAGE_KEY,'1'); // respect user dismiss
+  });
+
+  iosOk.addEventListener('click', () => {
+    iosModal.style.display = 'none';
+    iosModal.setAttribute('aria-hidden','true');
+    localStorage.setItem(STORAGE_KEY,'1');
+  });
+
+  // when PWA actually installed
+  window.addEventListener('appinstalled', () => {
+    hideBar();
+    localStorage.setItem(STORAGE_KEY,'1');
+    // optional: you can analytics track install here
+    console.log('PWA installed');
+  });
+
+  // show bar for some platforms that already support add-to-home
+  // e.g. if Chrome on Android but beforeinstallprompt already fired, you still covered by event.
+  // If user loads and we detect standalone, hide.
+  if (window.matchMedia('(display-mode: standalone)').matches || window.navigator.standalone === true) {
+    // already installed
+    localStorage.setItem(STORAGE_KEY,'1');
+  }
+
+  // Optional: show the bar after short delay if manifest+sw exist and beforeinstallprompt didn't fire (rare)
+  window.addEventListener('load', () => {
+    setTimeout(() => {
+      if (!deferredPrompt && !localStorage.getItem(STORAGE_KEY)) {
+        // try detect Android Chrome-ish UA
+        const isAndroidChrome = /Android/.test(navigator.userAgent) && /Chrome/.test(navigator.userAgent);
+        if (!window.matchMedia('(display-mode: standalone)').matches && isAndroidChrome) {
+          showBar();
+        }
+      }
+    }, 1200);
+  });
+})();
+</script>
+</body>
 </html>
